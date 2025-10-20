@@ -1,0 +1,20 @@
+[package]
+name = "vercode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+
+[dependencies]
+uuid.workspace = true
+vercode-macros.workspace = true
+
+[dev-dependencies]
+bincode.workspace = true
+criterion.workspace = true
+serde.workspace = true
+uuid = { workspace = true, features = ["v4", "serde"]}
+
+[[bench]]
+name = "vercode_bench"
+harness = false
