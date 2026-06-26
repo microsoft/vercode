@@ -741,10 +741,24 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
 
     fn size_version(&self, version: u32) -> usize {
         let mut total = 4; // length prefix
-        for item in self.iter() {
-            total += item.size_version(version);
+        let special_case = std::any::TypeId::of::<T>() == std::any::TypeId::of::<u8>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u16>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u32>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u64>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u128>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i8>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>();
+        if special_case {
+            total + self.len() * std::mem::size_of::<T>()
+        } else {
+            for item in self.iter() {
+                total += item.size_version(version);
+            }
+            total
         }
-        total
     }
 }
 
