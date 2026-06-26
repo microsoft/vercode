@@ -1,10 +1,11 @@
 [package]
 name = "vercode-macros"
+description = "Derive macros for the vercode versioned serialization crate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-#homepage.workspace = true
-#repository.workspace = true
+homepage.workspace = true
+repository.workspace = true
 readme.workspace = true
 
 [lib]

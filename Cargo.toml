@@ -12,6 +12,8 @@ version = "0.5.1"
 edition = "2024"
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/microsoft/vercode"
+repository = "https://github.com/microsoft/vercode"
 
 [profile.release]
 debug = true
