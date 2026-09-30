@@ -136,8 +136,8 @@ corresponding `u16` conversions. Both require `Copy` and `Default`.
 
 - Use **explicit, stable codes** and choose a safe default. `#[default]` selects
   the fallback; the variant does not have to be named `Unknown`.
-- Unknown codes are **discarded**. Reserializing the fallback writes its own code.
-  Use an integer newtype with `VercodeTransparent` when codes must be preserved.
+- Unknown values on the wire are **discarded** when deserializing. The enum value will
+  be the result of Default::default() for the enum type.
 - Truncated input returns `InvalidEncoding`, not the default.
 - Encoding is one byte (`VercodeEnumU8`) or two little-endian bytes (`VercodeEnumU16`),
   without an enum length prefix. It is **not wire-compatible** with derived `Vercode` enums.
