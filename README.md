@@ -107,6 +107,51 @@ struct UserId(u64);
 // Serializes as just a u64, no wrapper overhead
 ```
 
+## Integer enums with default fallback
+
+For fieldless enums whose unknown wire codes should map to `Default::default()`,
+derive `VercodeEnumU8` or `VercodeEnumU16` instead of `Vercode`. These implement
+`VerCodable` and the `U8Enum` or `U16Enum` marker trait, respectively, delegating
+to the existing integer codec.
+
+```rust
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use vercode::{VercodeEnumU8, deserialize, serialize_to_vec};
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, IntoPrimitive, TryFromPrimitive, VercodeEnumU8)]
+#[repr(u8)]
+enum Mode {
+    Normal = 0,
+    #[default]
+    Unknown = 255,
+}
+
+assert_eq!(serialize_to_vec(&Mode::Normal), vec![0]);
+assert_eq!(deserialize::<Mode>(&[42]).unwrap(), Mode::Unknown);
+```
+
+Add `num_enum = "0.7"` to your dependencies for the conversion derives, or implement
+`TryFrom<u8>` and `Into<u8>` yourself. For `VercodeEnumU16`, use `#[repr(u16)]` and the
+corresponding `u16` conversions. Both require `Copy` and `Default`.
+
+- Use **explicit, stable codes** and choose a safe default. `#[default]` selects
+  the fallback; the variant does not have to be named `Unknown`.
+- Unknown codes are **discarded**. Reserializing the fallback writes its own code.
+  Use an integer newtype with `VercodeTransparent` when codes must be preserved.
+- Truncated input returns `InvalidEncoding`, not the default.
+- Encoding is one byte (`VercodeEnumU8`) or two little-endian bytes (`VercodeEnumU16`),
+  without an enum length prefix. It is **not wire-compatible** with derived `Vercode` enums.
+- Do not also derive `Vercode` on these enums. Implementing just the marker trait
+  does not enable serialization; use the matching derive. Separate blanket
+  implementations for the two markers would overlap under Rust's coherence rules.
+
+See [`vercode/examples/num_enum.rs`](vercode/examples/num_enum.rs) for a parent
+struct read by an older enum version. Run it with:
+
+```sh
+cargo run -p vercode --example num_enum
+```
+
 ## Format
 
 Vercode uses a **length-prefixed binary format**:

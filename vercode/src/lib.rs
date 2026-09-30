@@ -11,7 +11,72 @@ use std::num::{
 use uuid::Uuid;
 
 // Re-export the Vercode attribute macros
-pub use vercode_macros::{Vercode, VercodeTransparent};
+pub use vercode_macros::{Vercode, VercodeEnumU8, VercodeEnumU16, VercodeTransparent};
+
+/// A fieldless enum encoded as a single `u8`, defaulting on unknown codes.
+///
+/// Use `#[derive(vercode::VercodeEnumU8)]` on a `#[repr(u8)]` enum to implement both
+/// this marker trait and [`VerCodable`]. Implementing the marker alone does not
+/// enable serialization: separate blanket implementations for `U8Enum` and
+/// [`U16Enum`] would overlap. Do not also derive [`Vercode`].
+///
+/// The enum must implement `Copy`, `Default`, `TryFrom<u8>`, and `Into<u8>`.
+/// The conversions can be handwritten or derived with the `num_enum` crate;
+/// Vercode does not require it as a runtime dependency.
+///
+/// Failed integer-to-enum conversions produce `Default::default()`. Truncated
+/// input returns [`InvalidEncoding`] instead. Unknown codes are discarded;
+/// reserializing the fallback writes its own code, not the original code.
+/// Choose a default whose behavior is safe for values you do not recognize.
+///
+/// Assign stable, explicit codes. This one-byte encoding is **not compatible**
+/// with the length-prefixed format produced by deriving [`Vercode`] on an enum.
+///
+/// ```
+/// use num_enum::{IntoPrimitive, TryFromPrimitive};
+/// use vercode::{VercodeEnumU8, deserialize, serialize_to_vec};
+///
+/// #[derive(Copy, Clone, Debug, Default, PartialEq, IntoPrimitive, TryFromPrimitive, VercodeEnumU8)]
+/// #[repr(u8)]
+/// enum Mode {
+///     Normal = 0,
+///     #[default]
+///     Unknown = 255,
+/// }
+///
+/// assert_eq!(serialize_to_vec(&Mode::Normal), vec![0]);
+/// assert_eq!(deserialize::<Mode>(&[42]).unwrap(), Mode::Unknown);
+/// ```
+pub trait U8Enum: Copy + Default + TryFrom<u8> + Into<u8> {}
+
+/// A fieldless enum encoded as a little-endian `u16`, defaulting on unknown codes.
+///
+/// Use `#[derive(vercode::VercodeEnumU16)]` on a `#[repr(u16)]` enum to implement both
+/// this marker trait and [`VerCodable`]. The enum must implement `Copy`, `Default`,
+/// `TryFrom<u16>`, and `Into<u16>`. As with [`U8Enum`], implementing the marker
+/// alone does not enable serialization; do not also derive [`Vercode`].
+///
+/// Failed conversions produce `Default::default()` and discard the unknown code.
+/// Truncated input returns [`InvalidEncoding`]. Use stable, explicit codes and
+/// a safe default. This two-byte format is not compatible with derived
+/// [`Vercode`] enum encoding.
+///
+/// ```
+/// use num_enum::{IntoPrimitive, TryFromPrimitive};
+/// use vercode::{VercodeEnumU16, deserialize, serialize_to_vec};
+///
+/// #[derive(Copy, Clone, Debug, Default, PartialEq, IntoPrimitive, TryFromPrimitive, VercodeEnumU16)]
+/// #[repr(u16)]
+/// enum Status {
+///     Ready = 0x1234,
+///     #[default]
+///     Unknown = 0xffff,
+/// }
+///
+/// assert_eq!(serialize_to_vec(&Status::Ready), vec![0x34, 0x12]);
+/// assert_eq!(deserialize::<Status>(&[0x78, 0x56]).unwrap(), Status::Unknown);
+/// ```
+pub trait U16Enum: Copy + Default + TryFrom<u16> + Into<u16> {}
 
 /// Serialize a value into the provided buffer, returning a slice of the buffer
 /// that contains the serialized data.
