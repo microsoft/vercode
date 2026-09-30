@@ -8,10 +8,12 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/microsoft/vercode"
+repository = "https://github.com/microsoft/vercode"
 
 [profile.release]
 debug = true
@@ -19,11 +21,12 @@ debug = true
 [workspace.dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "2.0", features = ["derive"] }
-uuid = { version = "1.18.1", features = ["v4"] }
-vercode-macros = { path = "vercode-macros", version = "0.5.1" }
+syn = { version = "2", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+vercode-macros = { path = "vercode-macros", version = "0.5.2" }
 
 # dev dependencies
 bincode = "1"
-criterion = "0.8.0"
-serde = { version = "1.0.228", features = ["derive"] }
+criterion = "0.8"
+num_enum = "0.7"
+serde = { version = "1", features = ["derive"] }

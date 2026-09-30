@@ -3,6 +3,26 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
 
+mod integer_enum;
+
+/// Encode a fieldless `#[repr(u8)]` enum through `Into<u8>` and `TryFrom<u8>`.
+/// Conversion failures decode to `Default::default()`.
+#[proc_macro_derive(VercodeEnumU8)]
+pub fn derive_vercode_enum_u8(input: TokenStream) -> TokenStream {
+    integer_enum::derive(parse_macro_input!(input as DeriveInput), "u8", "U8Enum")
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Encode a fieldless `#[repr(u16)]` enum through `Into<u16>` and `TryFrom<u16>`.
+/// Conversion failures decode to `Default::default()`.
+#[proc_macro_derive(VercodeEnumU16)]
+pub fn derive_vercode_enum_u16(input: TokenStream) -> TokenStream {
+    integer_enum::derive(parse_macro_input!(input as DeriveInput), "u16", "U16Enum")
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Helper struct for field information during code generation
 #[derive(Clone)]
 struct FieldInfo<'a> {
