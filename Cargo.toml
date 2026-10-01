@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 license = "MIT"
 readme = "README.md"
@@ -21,9 +21,9 @@ debug = true
 [workspace.dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "2", features = ["derive"] }
+syn = { version = "3", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
-vercode-macros = { path = "vercode-macros", version = "0.5.2" }
+vercode-macros = { path = "vercode-macros", version = "0.5.3" }
 
 # dev dependencies
 bincode = "1"
