@@ -13,6 +13,9 @@ use uuid::Uuid;
 // Re-export the Vercode attribute macros
 pub use vercode_macros::{Vercode, VercodeEnumU8, VercodeEnumU16, VercodeTransparent};
 
+const MAX_INITIAL_CAPACITY: usize = 4096;
+const MAX_INITIAL_CAPACITY_BYTES: usize = 1024 * 1024;
+
 /// A fieldless enum encoded as a single `u8`, defaulting on unknown codes.
 ///
 /// Use `#[derive(vercode::VercodeEnumU8)]` on a `#[repr(u8)]` enum to implement both
@@ -146,7 +149,7 @@ pub fn serialize_to_vec<T: VerCodable>(value: &T) -> Vec<u8> {
     let size = value.size_version(T::MAX_VERSION);
     let mut buf = vec![0u8; size];
     let serialized = serialize(value, &mut buf);
-    debug_assert_eq!(serialized.len(), size);
+    assert_eq!(serialized.len(), size);
     buf
 }
 
@@ -426,6 +429,17 @@ pub trait VerCodable: Sized {
 
     /// Return the number of bytes that would be written by write_version for this version.
     fn size_version(&self, version: u32) -> usize;
+}
+
+// Cap initial reservations from untrusted counts at 4096 items or 1 MiB of item storage.
+// Zero-sized items use only the item-count cap; collections can grow as elements are decoded.
+fn initial_capacity<T>(desired_capacity: usize) -> usize {
+    let capacity = std::cmp::min(desired_capacity, MAX_INITIAL_CAPACITY);
+    let item_size = std::mem::size_of::<T>();
+    match MAX_INITIAL_CAPACITY_BYTES.checked_div(item_size) {
+        Some(byte_capacity) => std::cmp::min(capacity, byte_capacity),
+        None => capacity,
+    }
 }
 
 impl VerCodable for bool {
@@ -741,7 +755,8 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>()
-            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>();
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<()>();
 
         if special_case {
             let value = self.as_slice();
@@ -769,7 +784,6 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
         let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
         let mut offset = 4;
 
-        let mut result: Vec<T> = Vec::with_capacity(len);
         let special_case = std::any::TypeId::of::<T>() == std::any::TypeId::of::<u8>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u16>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<u32>()
@@ -779,11 +793,18 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>()
-            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>();
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<()>();
         if special_case {
-            let byte_len = len * std::mem::size_of::<T>();
-            assert!(buf.len() >= offset + byte_len);
-            // SAFETY: these types have same representation as their raw memory layout
+            let byte_len = len
+                .checked_mul(std::mem::size_of::<T>())
+                .ok_or(InvalidEncoding)?;
+            if byte_len > buf.len() - offset {
+                return Err(InvalidEncoding);
+            }
+            let mut result: Vec<T> = Vec::with_capacity(len);
+            // SAFETY: integers accept all bit patterns; () needs no initialized bytes.
+            // The checked byte count fits the input and the vector's capacity.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     buf[offset..].as_ptr(),
@@ -794,7 +815,8 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             }
             Ok((result, offset + byte_len))
         } else {
-            let mut result = Vec::with_capacity(len);
+            let capacity = initial_capacity::<T>(len);
+            let mut result = Vec::with_capacity(capacity);
             for _ in 0..len {
                 let (item, read_bytes) = T::read_version(version, &buf[offset..])?;
                 result.push(item);
@@ -815,7 +837,8 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i16>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i32>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i64>()
-            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>();
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>()
+            || std::any::TypeId::of::<T>() == std::any::TypeId::of::<()>();
         if special_case {
             total + self.len() * std::mem::size_of::<T>()
         } else {
@@ -866,7 +889,8 @@ where
         let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
         let mut offset = 4;
 
-        let mut result = HashMap::with_capacity_and_hasher(len, S::default());
+        let capacity = initial_capacity::<(K, V)>(len);
+        let mut result = HashMap::with_capacity_and_hasher(capacity, S::default());
         for _ in 0..len {
             let (key, key_bytes) = K::read_version(version, &buf[offset..])?;
             offset += key_bytes;
@@ -919,7 +943,8 @@ where
         let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
         let mut offset = 4;
 
-        let mut result = HashSet::with_capacity_and_hasher(len, S::default());
+        let capacity = initial_capacity::<T>(len);
+        let mut result = HashSet::with_capacity_and_hasher(capacity, S::default());
         for _ in 0..len {
             let (item, read_bytes) = T::read_version(version, &buf[offset..])?;
             result.insert(item);
@@ -1131,5 +1156,26 @@ impl VerCodable for std::net::SocketAddr {
             std::net::SocketAddr::V4(_) => 7,
             std::net::SocketAddr::V6(_) => 27,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial_capacity;
+
+    #[test]
+    fn initial_capacity_caps_items_and_element_storage() {
+        assert_eq!(initial_capacity::<u8>(0), 0);
+        assert_eq!(initial_capacity::<u8>(17), 17);
+        assert_eq!(initial_capacity::<u8>(usize::MAX), 4096);
+        assert_eq!(initial_capacity::<[u8; 256]>(usize::MAX), 4096);
+        assert_eq!(initial_capacity::<[u8; 257]>(usize::MAX), 4080);
+        assert_eq!(initial_capacity::<[u8; 4096]>(usize::MAX), 256);
+        assert_eq!(initial_capacity::<[u8; 4096]>(7), 7);
+        assert_eq!(initial_capacity::<[u8; 1048576]>(usize::MAX), 1);
+        assert_eq!(initial_capacity::<[u8; 1048577]>(usize::MAX), 0);
+        assert_eq!(initial_capacity::<()>(0), 0);
+        assert_eq!(initial_capacity::<()>(usize::MAX), 4096);
+        assert_eq!(initial_capacity::<(u64, [u8; 4096])>(usize::MAX), 255);
     }
 }

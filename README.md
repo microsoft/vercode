@@ -23,6 +23,18 @@ Add to your `Cargo.toml`:
 vercode = { version = "0.5" }
 ```
 
+## Collection decoding
+
+Generic `Vec`, `HashMap`, and `HashSet` decoders limit their initial reservation
+to 4096 elements or 1 MiB of element storage, whichever is smaller.
+Maps use the size of each key-value pair.
+Hash-table overhead and allocator rounding can increase the actual allocation.
+This limit applies only to the initial reservation, not subsequent growth or total decoded memory.
+
+Integer vectors allocate only after the decoder checks that the full payload fits in the input.
+`Vec<()>` reads and writes only its count, without a loop over its elements.
+These changes preserve the wire format.
+
 ## Example: Evolving a Protocol
 
 Here's a complete example showing structs, enums, and version evolution:
