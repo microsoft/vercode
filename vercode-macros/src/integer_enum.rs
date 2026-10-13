@@ -45,7 +45,7 @@ pub(crate) fn derive(input: DeriveInput, repr: &str, marker: &str) -> syn::Resul
             const MAX_VERSION: u32 = <#repr as ::vercode::VerCodable>::MAX_VERSION;
 
             #[inline(always)]
-            fn write_version(&self, version: u32, buf: &mut [u8]) -> usize {
+            fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 let raw: #repr = ::core::convert::Into::into(*self);
                 <#repr as ::vercode::VerCodable>::write_version(&raw, version, buf)
             }
@@ -62,7 +62,7 @@ pub(crate) fn derive(input: DeriveInput, repr: &str, marker: &str) -> syn::Resul
             }
 
             #[inline(always)]
-            fn size_version(&self, version: u32) -> usize {
+            fn size_version(&self, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 let raw: #repr = ::core::convert::Into::into(*self);
                 <#repr as ::vercode::VerCodable>::size_version(&raw, version)
             }

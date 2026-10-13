@@ -20,15 +20,15 @@ fn test_uuid() {
         label: Uuid::new_v4(),
     };
     let mut buf0 = [0u8; 40];
-    let sv0 = serialize_version(&ut, 0, &mut buf0);
+    let sv0 = serialize_version(&ut, 0, &mut buf0).unwrap();
     assert_eq!(sv0.len(), 20); // 16 bytes for id + 4 bytes length prefix
     let mut buf1 = [0u8; 40];
-    let sv1 = serialize_version(&ut, 1, &mut buf1);
+    let sv1 = serialize_version(&ut, 1, &mut buf1).unwrap();
     assert_eq!(sv1.len(), 36); // 16 bytes for id + 16 bytes for label + 4 bytes length prefix
-    assert_eq!(ut.size_version(0), sv0.len());
-    assert_eq!(ut.size_version(1), sv1.len());
-    assert_eq!(vercode::size_version(&ut, 0), sv0.len());
-    assert_eq!(vercode::size_version(&ut, 1), sv1.len());
+    assert_eq!(ut.size_version(0).unwrap(), sv0.len());
+    assert_eq!(ut.size_version(1).unwrap(), sv1.len());
+    assert_eq!(vercode::size_version(&ut, 0).unwrap(), sv0.len());
+    assert_eq!(vercode::size_version(&ut, 1).unwrap(), sv1.len());
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn option_none_some_round_trip() {
         tail: 5,
     };
     let mut buf = [0u8; 128];
-    let serialized_none = serialize(&none_case, &mut buf);
+    let serialized_none = serialize(&none_case, &mut buf).unwrap();
     let decoded_none = deserialize::<OptWrap>(serialized_none).unwrap();
     assert_eq!(decoded_none, none_case);
 
@@ -59,7 +59,7 @@ fn option_none_some_round_trip() {
         inner: Some(Inner { a: 9, b: 7 }),
         tail: 6,
     };
-    let serialized_some = serialize(&some_case, &mut buf);
+    let serialized_some = serialize(&some_case, &mut buf).unwrap();
     let decoded_some = deserialize::<OptWrap>(serialized_some).unwrap();
     assert_eq!(decoded_some, some_case);
 }
@@ -135,7 +135,7 @@ fn types_round_trip_test() {
     };
 
     let mut buf = [0u8; 1024];
-    let serialized = serialize(&example, &mut buf);
+    let serialized = serialize(&example, &mut buf).unwrap();
     let deserialized = deserialize::<TestTypes>(serialized).unwrap();
     assert_eq!(deserialized, example);
 }

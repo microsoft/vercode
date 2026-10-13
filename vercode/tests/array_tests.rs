@@ -23,7 +23,7 @@ fn array_of_structs() {
     };
 
     let mut buf = [0u8; 128];
-    let serialized = vercode::serialize(&triangle, &mut buf);
+    let serialized = vercode::serialize(&triangle, &mut buf).unwrap();
 
     // 4 (outer length prefix) +
     // 3 * (4 (Point length prefix) + 4 (x) + 4 (y)) = 4 + 3 * 12 = 40
@@ -54,7 +54,7 @@ fn array_of_structs_with_versions() {
     let mut buf0 = [0u8; 128];
 
     // Version 0: only id fields
-    let serialized_v0 = serialize_version(&container, 0, &mut buf0);
+    let serialized_v0 = serialize_version(&container, 0, &mut buf0).unwrap();
     // 4 (outer length) + 2 * (4 (Item length) + 1 (id)) = 4 + 10 = 14
     assert_eq!(serialized_v0.len(), 14);
 
@@ -66,7 +66,7 @@ fn array_of_structs_with_versions() {
 
     // Version 1: both id and label fields
     let mut buf1 = [0u8; 128];
-    let serialized_v1 = serialize_version(&container, 1, &mut buf1);
+    let serialized_v1 = serialize_version(&container, 1, &mut buf1).unwrap();
     // 4 (outer length) + 2 * (4 (Item length) + 1 (id) + 2 (label)) = 4 + 14 = 18
     assert_eq!(serialized_v1.len(), 18);
 

@@ -34,7 +34,7 @@ where
     // Test Some(value) case
     let some_option = Some(some_value.clone());
     let mut buf = vec![0u8; 1024];
-    let serialized_some = serialize(&some_option, &mut buf);
+    let serialized_some = serialize(&some_option, &mut buf).unwrap();
 
     assert_eq!(
         serialized_some.len(),
@@ -42,7 +42,7 @@ where
         "Some({some_value:?}) serialized size mismatch"
     );
     assert_eq!(
-        size(&some_option),
+        size(&some_option).unwrap(),
         expected_some_size,
         "Some({some_value:?}) size calculation mismatch"
     );
@@ -53,7 +53,7 @@ where
 
     // Test None case
     let none_option: Option<T> = None;
-    let serialized_none = serialize(&none_option, &mut buf);
+    let serialized_none = serialize(&none_option, &mut buf).unwrap();
 
     assert_eq!(
         serialized_none.len(),
@@ -62,7 +62,7 @@ where
         std::any::type_name::<T>()
     );
     assert_eq!(
-        size(&none_option),
+        size(&none_option).unwrap(),
         expected_none_size,
         "None size calculation mismatch for type {:?}",
         std::any::type_name::<T>()
@@ -197,13 +197,13 @@ fn test_option_with_version_directives() {
     };
 
     // Test full serialization (all versions)
-    let serialized = serialize_to_vec(&test_struct);
+    let serialized = serialize_to_vec(&test_struct).unwrap();
     let deserialized: VersionedStruct =
         deserialize(&serialized).expect("Failed to deserialize versioned struct");
     assert_eq!(deserialized, test_struct);
 
     // Test that sizes are calculated correctly
-    let total_size = size(&test_struct);
+    let total_size = size(&test_struct).unwrap();
     assert_eq!(serialized.len(), total_size);
 
     // Create a struct with None values
@@ -213,7 +213,7 @@ fn test_option_with_version_directives() {
         another_field: None,
     };
 
-    let serialized_none = serialize_to_vec(&test_struct_none);
+    let serialized_none = serialize_to_vec(&test_struct_none).unwrap();
     let deserialized_none: VersionedStruct = deserialize(&serialized_none)
         .expect("Failed to deserialize versioned struct with None values");
     assert_eq!(deserialized_none, test_struct_none);
@@ -223,7 +223,7 @@ fn test_option_with_version_directives() {
 
     // Test version 0 serialization (only base_field)
     let mut buf0 = vec![0u8; 1024];
-    let v0_serialized = serialize_version(&test_struct, 0, &mut buf0);
+    let v0_serialized = serialize_version(&test_struct, 0, &mut buf0).unwrap();
     let v0_deserialized: VersionedStruct =
         deserialize(v0_serialized).expect("Failed to deserialize version 0 data");
 
@@ -237,7 +237,7 @@ fn test_option_with_version_directives() {
 
     // Test version 1 serialization (base_field + optional_field)
     let mut buf1 = vec![0u8; 1024];
-    let v1_serialized = serialize_version(&test_struct, 1, &mut buf1);
+    let v1_serialized = serialize_version(&test_struct, 1, &mut buf1).unwrap();
     let v1_deserialized: VersionedStruct =
         deserialize(v1_serialized).expect("Failed to deserialize version 1 data");
 
@@ -277,13 +277,13 @@ fn test_option_with_version_directives() {
     };
 
     // Test full round-trip
-    let niche_serialized = serialize_to_vec(&niche_struct);
+    let niche_serialized = serialize_to_vec(&niche_struct).unwrap();
     let niche_deserialized: NicheVersionedStruct = deserialize(&niche_serialized).unwrap();
     assert_eq!(niche_deserialized, niche_struct);
 
     // Test that version 0 only includes id
     let mut niche_buf0 = vec![0u8; 1024];
-    let niche_v0 = serialize_version(&niche_struct, 0, &mut niche_buf0);
+    let niche_v0 = serialize_version(&niche_struct, 0, &mut niche_buf0).unwrap();
     let niche_v0_deser: NicheVersionedStruct = deserialize(niche_v0).unwrap();
     assert_eq!(
         niche_v0_deser,
@@ -297,7 +297,7 @@ fn test_option_with_version_directives() {
 
     // Test that version 1 includes id + niche_bool
     let mut niche_buf1 = vec![0u8; 1024];
-    let niche_v1 = serialize_version(&niche_struct, 1, &mut niche_buf1);
+    let niche_v1 = serialize_version(&niche_struct, 1, &mut niche_buf1).unwrap();
     let niche_v1_deser: NicheVersionedStruct = deserialize(niche_v1).unwrap();
     assert_eq!(
         niche_v1_deser,
@@ -311,7 +311,7 @@ fn test_option_with_version_directives() {
 
     // Test that version 2 includes id + niche_bool + niche_nonzero
     let mut niche_buf2 = vec![0u8; 1024];
-    let niche_v2 = serialize_version(&niche_struct, 2, &mut niche_buf2);
+    let niche_v2 = serialize_version(&niche_struct, 2, &mut niche_buf2).unwrap();
     let niche_v2_deser: NicheVersionedStruct = deserialize(niche_v2).unwrap();
     assert_eq!(
         niche_v2_deser,
@@ -338,19 +338,19 @@ fn test_nested_options() {
     let mut buf = vec![0u8; 1024];
 
     // Some(Some(42)): outer discriminant (1) + inner discriminant (1) + u32 (4) = 6 bytes
-    let serialized_double_some = serialize(&double_some, &mut buf);
+    let serialized_double_some = serialize(&double_some, &mut buf).unwrap();
     assert_eq!(serialized_double_some.len(), 6);
     let deserialized: Option<Option<u32>> = deserialize(serialized_double_some).unwrap();
     assert_eq!(deserialized, double_some);
 
     // Some(None): outer discriminant (1) + inner discriminant (1) = 2 bytes
-    let serialized_some_none = serialize(&some_none, &mut buf);
+    let serialized_some_none = serialize(&some_none, &mut buf).unwrap();
     assert_eq!(serialized_some_none.len(), 2);
     let deserialized: Option<Option<u32>> = deserialize(serialized_some_none).unwrap();
     assert_eq!(deserialized, some_none);
 
     // None: outer discriminant (1) = 1 byte
-    let serialized_none = serialize(&none, &mut buf);
+    let serialized_none = serialize(&none, &mut buf).unwrap();
     assert_eq!(serialized_none.len(), 1);
     let deserialized: Option<Option<u32>> = deserialize(serialized_none).unwrap();
     assert_eq!(deserialized, none);
@@ -386,8 +386,8 @@ fn test_option_with_versioned_struct() {
     let none_point: Option<VersionedPoint> = None;
 
     // Serialize and deserialize
-    let serialized_some = serialize_to_vec(&some_point);
-    let serialized_none = serialize_to_vec(&none_point);
+    let serialized_some = serialize_to_vec(&some_point).unwrap();
+    let serialized_none = serialize_to_vec(&none_point).unwrap();
 
     let deserialized_some: Option<VersionedPoint> = deserialize(&serialized_some).unwrap();
     let deserialized_none: Option<VersionedPoint> = deserialize(&serialized_none).unwrap();
@@ -430,7 +430,7 @@ fn test_option_struct_with_option_fields() {
         regular_data: Some(999),
     };
 
-    let serialized_some = serialize_to_vec(&test_with_some);
+    let serialized_some = serialize_to_vec(&test_with_some).unwrap();
     let deserialized_some: TestStruct = deserialize(&serialized_some).unwrap();
     assert_eq!(deserialized_some, test_with_some);
 
@@ -443,7 +443,7 @@ fn test_option_struct_with_option_fields() {
         regular_data: None,
     };
 
-    let serialized_none = serialize_to_vec(&test_with_none);
+    let serialized_none = serialize_to_vec(&test_with_none).unwrap();
     let deserialized_none: TestStruct = deserialize(&serialized_none).unwrap();
     assert_eq!(deserialized_none, test_with_none);
 
@@ -456,7 +456,7 @@ fn test_option_struct_with_option_fields() {
         regular_data: None,
     };
 
-    let serialized_mixed = serialize_to_vec(&test_mixed);
+    let serialized_mixed = serialize_to_vec(&test_mixed).unwrap();
     let deserialized_mixed: TestStruct = deserialize(&serialized_mixed).unwrap();
     assert_eq!(deserialized_mixed, test_mixed);
 }
@@ -466,5 +466,5 @@ fn test_option_transparent() {
     #[derive(VercodeTransparent)]
     struct Transparent(NonZeroU64);
 
-    assert_eq!(8, vercode::size(&Transparent(NonZeroU64::MIN)));
+    assert_eq!(8, vercode::size(&Transparent(NonZeroU64::MIN)).unwrap());
 }

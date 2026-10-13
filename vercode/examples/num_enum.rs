@@ -59,7 +59,7 @@ fn main() -> Result<(), vercode::InvalidEncoding> {
         mode: NewMode::Turbo,
         status: Status::Ready,
         retries: 42,
-    });
+    })?;
     assert_eq!(bytes.len(), 4 + 1 + 2 + 4);
 
     let old = deserialize::<OldConfig>(&bytes)?;
@@ -68,8 +68,8 @@ fn main() -> Result<(), vercode::InvalidEncoding> {
     assert_eq!(old.retries, 42);
     println!("{old:?}");
 
-    assert_eq!(serialize_to_vec(&Status::Ready), vec![0x34, 0x12]);
+    assert_eq!(serialize_to_vec(&Status::Ready)?, vec![0x34, 0x12]);
     assert_eq!(deserialize::<Status>(&[0x78, 0x56])?, Status::Unknown);
-    assert_eq!(serialize_to_vec(&old.mode), vec![255]);
+    assert_eq!(serialize_to_vec(&old.mode)?, vec![255]);
     Ok(())
 }
