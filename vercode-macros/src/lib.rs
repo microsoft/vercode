@@ -189,8 +189,14 @@ fn generate_field_reads(batches: &[VersionBatch]) -> Vec<proc_macro2::TokenStrea
             let temp_var = field.temp_var();
             let ty = field.ty;
             read_stmts.push(quote! {
-                (#temp_var, __temp_size) = <#ty as ::vercode::VerCodable>::read_version(version, &buf[offset..])?;
-                offset += __temp_size;
+                (#temp_var, __temp_size) = <#ty as ::vercode::VerCodable>::read_version(
+                    version,
+                    buf.get(offset..).ok_or(::vercode::InvalidEncoding)?,
+                )?;
+                offset = match offset.checked_add(__temp_size) {
+                    Some(next) if next <= buf.len() => next,
+                    _ => return Err(::vercode::InvalidEncoding),
+                };
             });
             default_stmts.push(quote! {
                 #temp_var = <#ty as ::std::default::Default>::default();
@@ -596,12 +602,18 @@ fn derive_struct(
 
             #[inline(always)]
             fn read_version(version: u32, buf: &[u8]) -> ::std::result::Result<(Self, usize), ::vercode::InvalidEncoding> {
-                if buf.len() < 4 { return Err(::vercode::InvalidEncoding); }
-                let length = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+                let prefix: [u8; 4] = buf
+                    .get(..4)
+                    .ok_or(::vercode::InvalidEncoding)?
+                    .try_into()
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                let length = u32::from_le_bytes(prefix) as usize;
+                if length < 4 { return Err(::vercode::InvalidEncoding); }
+                let buf = buf.get(..length).ok_or(::vercode::InvalidEncoding)?;
                 let mut offset = 4usize;
                 #(#reads)*
                 let result = #construction;
-                Ok((result, offset))
+                Ok((result, length))
             }
 
             #[inline(always)]
@@ -674,16 +686,27 @@ fn derive_enum(
 
             #[inline(always)]
             fn read_version(version: u32, buf: &[u8]) -> ::std::result::Result<(Self, usize), ::vercode::InvalidEncoding> {
-                if buf.len() < 6 { return Err(::vercode::InvalidEncoding); }
-                let length = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-                let discriminant = u16::from_le_bytes(buf[4..6].try_into().unwrap()) as u32;
+                let prefix: [u8; 4] = buf
+                    .get(..4)
+                    .ok_or(::vercode::InvalidEncoding)?
+                    .try_into()
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                let length = u32::from_le_bytes(prefix) as usize;
+                if length < 6 { return Err(::vercode::InvalidEncoding); }
+                let buf = buf.get(..length).ok_or(::vercode::InvalidEncoding)?;
+                let tag: [u8; 2] = buf
+                    .get(4..6)
+                    .ok_or(::vercode::InvalidEncoding)?
+                    .try_into()
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                let discriminant = u16::from_le_bytes(tag) as u32;
                 let mut offset = 6usize;
 
                 let result = match discriminant {
                     #(#read_arms,)*
                     _ => return Err(::vercode::InvalidEncoding),
                 };
-                Ok((result, offset))
+                Ok((result, length))
             }
 
             #[inline(always)]

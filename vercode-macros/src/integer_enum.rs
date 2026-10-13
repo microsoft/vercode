@@ -52,7 +52,6 @@ pub(crate) fn derive(input: DeriveInput, repr: &str, marker: &str) -> syn::Resul
 
             #[inline(always)]
             fn read_version(version: u32, buf: &[u8]) -> ::core::result::Result<(Self, usize), ::vercode::InvalidEncoding> {
-                // Integer readers assume sufficient input; reject truncation before delegating.
                 if buf.len() < ::core::mem::size_of::<#repr>() {
                     return Err(::vercode::InvalidEncoding);
                 }

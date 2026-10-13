@@ -403,19 +403,19 @@ pub trait VerCodable: Sized {
         }
     }
 
+    /// Reads an option and rejects an inner byte count that exceeds the input.
     #[inline(always)]
     fn read_option(version: u32, buf: &[u8]) -> Result<(Option<Self>, usize), InvalidEncoding> {
-        if !buf.is_empty() {
-            match buf[0] {
-                0 => Ok((None, 1)),
-                1 => {
-                    let (value, size) = Self::read_version(version, &buf[1..])?;
-                    Ok((Some(value), 1 + size))
+        match buf {
+            [0, ..] => Ok((None, 1)),
+            [1, payload @ ..] => {
+                let (value, size) = Self::read_version(version, payload)?;
+                if size > payload.len() {
+                    return Err(InvalidEncoding);
                 }
-                _ => Err(InvalidEncoding),
+                Ok((Some(value), 1 + size))
             }
-        } else {
-            Err(InvalidEncoding)
+            _ => Err(InvalidEncoding),
         }
     }
 
@@ -442,6 +442,24 @@ fn initial_capacity<T>(desired_capacity: usize) -> usize {
     }
 }
 
+// Checked end so a corrupt length cannot overflow or pass the buffer.
+fn end_index(start: usize, len: usize, buf_len: usize) -> Result<usize, InvalidEncoding> {
+    let end = start.checked_add(len).ok_or(InvalidEncoding)?;
+    if end > buf_len {
+        return Err(InvalidEncoding);
+    }
+    Ok(end)
+}
+
+fn read_le_bytes<const N: usize>(buf: &[u8]) -> Result<[u8; N], InvalidEncoding> {
+    let Some(bytes) = buf.get(..N) else {
+        return Err(InvalidEncoding);
+    };
+    let mut out = [0u8; N];
+    out.copy_from_slice(bytes);
+    Ok(out)
+}
+
 impl VerCodable for bool {
     const MAX_VERSION: u32 = 0;
 
@@ -453,9 +471,9 @@ impl VerCodable for bool {
 
     #[inline(always)]
     fn read_version(_version: u32, buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
-        match buf[0] {
-            0 => Ok((false, 1)),
-            1 => Ok((true, 1)),
+        match buf.first() {
+            Some(0) => Ok((false, 1)),
+            Some(1) => Ok((true, 1)),
             _ => Err(InvalidEncoding),
         }
     }
@@ -477,15 +495,13 @@ impl VerCodable for bool {
 
     #[inline(always)]
     fn read_option(_version: u32, buf: &[u8]) -> Result<(Option<Self>, usize), InvalidEncoding> {
-        Ok((
-            match buf[0] {
-                0 => Some(false),
-                1 => Some(true),
-                2 => None,
-                _ => return Err(InvalidEncoding),
-            },
-            1,
-        ))
+        let value = match buf.first() {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            Some(2) => None,
+            _ => return Err(InvalidEncoding),
+        };
+        Ok((value, 1))
     }
 
     #[inline(always)]
@@ -510,10 +526,10 @@ macro_rules! impl_vercodable_bytes_try_as {
 
             #[inline(always)]
             fn read_version(_version: u32, buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
-                let len = std::mem::size_of::<$encoded>();
-                let value = <$encoded>::from_le_bytes(buf[..len].try_into().unwrap());
+                let bytes = read_le_bytes::<{ std::mem::size_of::<$encoded>() }>(buf)?;
+                let value = <$encoded>::from_le_bytes(bytes);
                 let value: $t = value.try_into().map_err(|_| InvalidEncoding)?;
-                Ok((value, len))
+                Ok((value, bytes.len()))
             }
 
             #[inline(always)]
@@ -540,10 +556,10 @@ macro_rules! impl_vercodable_bytes_nonzero_try_as {
 
             #[inline(always)]
             fn read_version(_version: u32, buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
-                let len = std::mem::size_of::<$encoded>();
-                let value = <$encoded>::from_le_bytes(buf[..len].try_into().unwrap());
+                let bytes = read_le_bytes::<{ std::mem::size_of::<$encoded>() }>(buf)?;
+                let value = <$encoded>::from_le_bytes(bytes);
                 let value: $t = value.try_into().map_err(|_| InvalidEncoding)?;
-                Ok((value, len))
+                Ok((value, bytes.len()))
             }
 
             #[inline(always)]
@@ -656,17 +672,31 @@ impl<const N: usize, T: VerCodable + Default> VerCodable for [T; N] {
     fn read_version(version: u32, buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
         let mut offset = 0;
         let mut error = false;
-        let result: [T; N] =
-            std::array::from_fn(|_| match T::read_version(version, &buf[offset..]) {
-                Ok((item, read_bytes)) => {
-                    offset += read_bytes;
-                    item
-                }
+        let result: [T; N] = std::array::from_fn(|_| {
+            if error {
+                return Default::default();
+            }
+            let Some(input) = buf.get(offset..) else {
+                error = true;
+                return Default::default();
+            };
+            match T::read_version(version, input) {
+                Ok((item, read_bytes)) => match end_index(offset, read_bytes, buf.len()) {
+                    Ok(next) => {
+                        offset = next;
+                        item
+                    }
+                    Err(_) => {
+                        error = true;
+                        Default::default()
+                    }
+                },
                 Err(_) => {
                     error = true;
                     Default::default()
                 }
-            });
+            }
+        });
 
         if !error {
             Ok((result, offset))
@@ -722,11 +752,9 @@ impl VerCodable for String {
             return Err(InvalidEncoding);
         }
         let len = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
-        if buf.len() < 4 + len {
-            return Err(InvalidEncoding);
-        }
-        let string = String::from_utf8(buf[4..4 + len].to_vec()).map_err(|_| InvalidEncoding)?;
-        Ok((string, 4 + len))
+        let end = end_index(4, len, buf.len())?;
+        let string = String::from_utf8(buf[4..end].to_vec()).map_err(|_| InvalidEncoding)?;
+        Ok((string, end))
     }
 
     #[inline(always)]
@@ -799,9 +827,7 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             let byte_len = len
                 .checked_mul(std::mem::size_of::<T>())
                 .ok_or(InvalidEncoding)?;
-            if byte_len > buf.len() - offset {
-                return Err(InvalidEncoding);
-            }
+            let total = end_index(offset, byte_len, buf.len())?;
             let mut result: Vec<T> = Vec::with_capacity(len);
             // SAFETY: integers accept all bit patterns; () needs no initialized bytes.
             // The checked byte count fits the input and the vector's capacity.
@@ -813,14 +839,15 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
                 );
                 result.set_len(len);
             }
-            Ok((result, offset + byte_len))
+            Ok((result, total))
         } else {
             let capacity = initial_capacity::<T>(len);
             let mut result = Vec::with_capacity(capacity);
             for _ in 0..len {
-                let (item, read_bytes) = T::read_version(version, &buf[offset..])?;
+                let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+                let (item, read_bytes) = T::read_version(version, input)?;
                 result.push(item);
-                offset += read_bytes;
+                offset = end_index(offset, read_bytes, buf.len())?;
             }
             Ok((result, offset))
         }
@@ -892,10 +919,12 @@ where
         let capacity = initial_capacity::<(K, V)>(len);
         let mut result = HashMap::with_capacity_and_hasher(capacity, S::default());
         for _ in 0..len {
-            let (key, key_bytes) = K::read_version(version, &buf[offset..])?;
-            offset += key_bytes;
-            let (value, value_bytes) = V::read_version(version, &buf[offset..])?;
-            offset += value_bytes;
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (key, key_bytes) = K::read_version(version, input)?;
+            offset = end_index(offset, key_bytes, buf.len())?;
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (value, value_bytes) = V::read_version(version, input)?;
+            offset = end_index(offset, value_bytes, buf.len())?;
             result.insert(key, value);
         }
 
@@ -946,9 +975,10 @@ where
         let capacity = initial_capacity::<T>(len);
         let mut result = HashSet::with_capacity_and_hasher(capacity, S::default());
         for _ in 0..len {
-            let (item, read_bytes) = T::read_version(version, &buf[offset..])?;
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (item, read_bytes) = T::read_version(version, input)?;
             result.insert(item);
-            offset += read_bytes;
+            offset = end_index(offset, read_bytes, buf.len())?;
         }
 
         Ok((result, offset))
@@ -1003,10 +1033,12 @@ where
 
         let mut result = BTreeMap::new();
         for _ in 0..len {
-            let (key, key_bytes) = K::read_version(version, &buf[offset..])?;
-            offset += key_bytes;
-            let (value, value_bytes) = V::read_version(version, &buf[offset..])?;
-            offset += value_bytes;
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (key, key_bytes) = K::read_version(version, input)?;
+            offset = end_index(offset, key_bytes, buf.len())?;
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (value, value_bytes) = V::read_version(version, input)?;
+            offset = end_index(offset, value_bytes, buf.len())?;
             result.insert(key, value);
         }
 
@@ -1070,8 +1102,9 @@ macro_rules! impl_vercodable_tuple {
             fn read_version(version: u32, buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
                 let mut offset = 0;
                 $(
-                    let ($var, size) = $T::read_version(version, &buf[offset..])?;
-                    offset += size;
+                    let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+                    let ($var, size) = $T::read_version(version, input)?;
+                    offset = end_index(offset, size, buf.len())?;
                 )+
                 Ok((($($var,)+), offset))
             }
@@ -1161,6 +1194,9 @@ impl VerCodable for std::net::SocketAddr {
 
 #[cfg(test)]
 mod tests {
+    use super::InvalidEncoding;
+    use super::VerCodable;
+    use super::end_index;
     use super::initial_capacity;
 
     #[test]
@@ -1177,5 +1213,65 @@ mod tests {
         assert_eq!(initial_capacity::<()>(0), 0);
         assert_eq!(initial_capacity::<()>(usize::MAX), 4096);
         assert_eq!(initial_capacity::<(u64, [u8; 4096])>(usize::MAX), 255);
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct ReportedSize<const N: usize>;
+
+    impl<const N: usize> VerCodable for ReportedSize<N> {
+        const MAX_VERSION: u32 = 0;
+
+        fn write_version(&self, _version: u32, _buf: &mut [u8]) -> usize {
+            N
+        }
+
+        fn read_version(_version: u32, _buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
+            Ok((Self, N))
+        }
+
+        fn size_version(&self, _version: u32) -> usize {
+            N
+        }
+    }
+
+    #[test]
+    fn option_rejects_overflow_and_a_reported_size_past_the_input() {
+        assert_eq!(
+            Option::<ReportedSize<{ usize::MAX }>>::read_version(0, &[1]),
+            Err(InvalidEncoding)
+        );
+        assert_eq!(
+            Option::<ReportedSize<2>>::read_version(0, &[1, 0]),
+            Err(InvalidEncoding)
+        );
+        assert_eq!(
+            Option::<Option<ReportedSize<{ usize::MAX }>>>::read_version(0, &[1, 1]),
+            Err(InvalidEncoding)
+        );
+    }
+
+    #[test]
+    fn option_preserves_valid_sizes_and_zero_byte_values() {
+        assert_eq!(Option::<()>::read_version(0, &[1]), Ok((Some(()), 1)));
+        assert_eq!(Option::<u8>::read_version(0, &[1, 42]), Ok((Some(42), 2)));
+        assert_eq!(
+            Option::<u8>::read_version(0, &[1, 42, 99]),
+            Ok((Some(42), 2))
+        );
+        assert_eq!(
+            Option::<ReportedSize<{ usize::MAX }>>::read_version(0, &[0]),
+            Ok((None, 1))
+        );
+        assert_eq!(Option::<u8>::read_version(0, &[]), Err(InvalidEncoding));
+        assert_eq!(Option::<u8>::read_version(0, &[1]), Err(InvalidEncoding));
+        assert_eq!(Option::<u8>::read_version(0, &[2]), Err(InvalidEncoding));
+    }
+
+    #[test]
+    fn end_index_rejects_overflow_and_a_range_past_the_buffer() {
+        // 4 + u32::MAX overflows when usize is 32 bits. String uses that addition.
+        assert_eq!(end_index(4, usize::MAX, 8), Err(InvalidEncoding));
+        assert_eq!(end_index(4, 5, 8), Err(InvalidEncoding));
+        assert_eq!(end_index(4, 4, 8), Ok(8));
     }
 }

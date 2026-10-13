@@ -174,6 +174,16 @@ Vercode uses a **length-prefixed binary format**:
 
 Fields are ordered by version number (v0, then v1, then v2, etc.), and then source order.
 
+The struct or enum length includes its header. Derived readers reject lengths
+smaller than the header or larger than the available input. Field readers receive
+only the bytes within that frame. Malformed lengths and truncated fields return
+`InvalidEncoding`.
+
+Derived readers consume the complete frame, including unknown trailing fields.
+This keeps the next value aligned when an older reader decodes nested values.
+`VerCodable::read_version` returns the complete frame length as its byte count.
+The top-level `deserialize` function still accepts additional bytes after the frame.
+
 ## Supported Types
 
 Native types implementing VerCodable:
