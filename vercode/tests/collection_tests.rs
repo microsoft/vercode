@@ -1,5 +1,61 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
-use vercode::{Vercode, deserialize, serialize};
+use vercode::{InvalidEncoding, VerCodable, Vercode, deserialize, serialize, serialize_to_vec};
+
+#[test]
+fn unit_vectors_use_only_the_count() {
+    for count in [0u32, 1, 7, u32::MAX] {
+        let bytes = count.to_le_bytes();
+        let (items, consumed) = Vec::<()>::read_version(0, &bytes).unwrap();
+        assert_eq!(items.len(), count as usize);
+        assert_eq!(consumed, 4);
+        assert_eq!(items.size_version(0), 4);
+        assert_eq!(serialize_to_vec(&items), bytes);
+    }
+
+    for end in 0..4 {
+        assert_eq!(deserialize::<Vec<()>>(&[0; 4][..end]), Err(InvalidEncoding));
+    }
+}
+
+#[test]
+fn unit_vectors_preserve_following_values_and_nested_counts() {
+    let bytes = [3, 0, 0, 0, 42];
+    assert_eq!(deserialize::<(Vec<()>, u8)>(&bytes), Ok((vec![(); 3], 42)));
+    let items = vec![vec![], vec![(); 3], vec![(); 7]];
+    let encoded = serialize_to_vec(&items);
+    assert_eq!(encoded.len(), 16);
+    assert_eq!(deserialize::<Vec<Vec<()>>>(&encoded), Ok(items));
+}
+
+#[test]
+fn generic_vectors_grow_past_the_initial_reservation() {
+    let items = vec![true; 4097];
+    assert_eq!(
+        deserialize::<Vec<bool>>(&serialize_to_vec(&items)),
+        Ok(items)
+    );
+
+    let items = vec![[7u8; 512]; 2050];
+    assert_eq!(
+        deserialize::<Vec<[u8; 512]>>(&serialize_to_vec(&items)),
+        Ok(items)
+    );
+}
+
+#[test]
+fn zero_sized_elements_with_nonempty_encodings_are_not_unit_vectors() {
+    #[derive(Debug, PartialEq, Vercode)]
+    struct Empty;
+
+    let items = vec![Empty, Empty];
+    let bytes = serialize_to_vec(&items);
+    assert_eq!(bytes, [2, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0]);
+    assert_eq!(deserialize::<Vec<Empty>>(&bytes), Ok(items));
+    assert_eq!(
+        deserialize::<Vec<Empty>>(&2u32.to_le_bytes()),
+        Err(InvalidEncoding)
+    );
+}
 
 #[test]
 fn hashmap_basic() {
