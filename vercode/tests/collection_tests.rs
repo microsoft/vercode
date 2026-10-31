@@ -8,8 +8,8 @@ fn unit_vectors_use_only_the_count() {
         let (items, consumed) = Vec::<()>::read_version(0, &bytes).unwrap();
         assert_eq!(items.len(), count as usize);
         assert_eq!(consumed, 4);
-        assert_eq!(items.size_version(0), 4);
-        assert_eq!(serialize_to_vec(&items), bytes);
+        assert_eq!(items.size_version(0), Ok(4));
+        assert_eq!(serialize_to_vec(&items).unwrap(), bytes);
     }
 
     for end in 0..4 {
@@ -22,7 +22,7 @@ fn unit_vectors_preserve_following_values_and_nested_counts() {
     let bytes = [3, 0, 0, 0, 42];
     assert_eq!(deserialize::<(Vec<()>, u8)>(&bytes), Ok((vec![(); 3], 42)));
     let items = vec![vec![], vec![(); 3], vec![(); 7]];
-    let encoded = serialize_to_vec(&items);
+    let encoded = serialize_to_vec(&items).unwrap();
     assert_eq!(encoded.len(), 16);
     assert_eq!(deserialize::<Vec<Vec<()>>>(&encoded), Ok(items));
 }
@@ -31,13 +31,13 @@ fn unit_vectors_preserve_following_values_and_nested_counts() {
 fn generic_vectors_grow_past_the_initial_reservation() {
     let items = vec![true; 4097];
     assert_eq!(
-        deserialize::<Vec<bool>>(&serialize_to_vec(&items)),
+        deserialize::<Vec<bool>>(&serialize_to_vec(&items).unwrap()),
         Ok(items)
     );
 
     let items = vec![[7u8; 512]; 2050];
     assert_eq!(
-        deserialize::<Vec<[u8; 512]>>(&serialize_to_vec(&items)),
+        deserialize::<Vec<[u8; 512]>>(&serialize_to_vec(&items).unwrap()),
         Ok(items)
     );
 }
@@ -48,7 +48,7 @@ fn zero_sized_elements_with_nonempty_encodings_are_not_unit_vectors() {
     struct Empty;
 
     let items = vec![Empty, Empty];
-    let bytes = serialize_to_vec(&items);
+    let bytes = serialize_to_vec(&items).unwrap();
     assert_eq!(bytes, [2, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0]);
     assert_eq!(deserialize::<Vec<Empty>>(&bytes), Ok(items));
     assert_eq!(
@@ -67,7 +67,7 @@ fn hashmap_basic() {
     map.insert(3u32, "three".to_string());
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: HashMap<u32, String> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 3);
@@ -83,7 +83,7 @@ fn hashmap_empty() {
     let map: HashMap<u32, String> = HashMap::new();
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: HashMap<u32, String> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 0);
@@ -117,7 +117,7 @@ fn hashmap_nested_values() {
     );
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: HashMap<u32, Person> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 2);
@@ -137,7 +137,7 @@ fn hashset_basic() {
     set.insert(5u32);
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&set, &mut buf);
+    let serialized = serialize(&set, &mut buf).unwrap();
     let decoded: HashSet<u32> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 5);
@@ -155,7 +155,7 @@ fn hashset_empty() {
     let set: HashSet<u32> = HashSet::new();
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&set, &mut buf);
+    let serialized = serialize(&set, &mut buf).unwrap();
     let decoded: HashSet<u32> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 0);
@@ -172,7 +172,7 @@ fn hashset_strings() {
     set.insert("cherry".to_string());
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&set, &mut buf);
+    let serialized = serialize(&set, &mut buf).unwrap();
     let decoded: HashSet<String> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 3);
@@ -201,7 +201,7 @@ fn hashmap_in_struct() {
     };
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&container, &mut buf);
+    let serialized = serialize(&container, &mut buf).unwrap();
     let decoded: Container = deserialize(serialized).unwrap();
 
     assert_eq!(decoded, container);
@@ -228,7 +228,7 @@ fn hashmap_nested() {
     outer.insert("second".to_string(), inner2);
 
     let mut buf = vec![0u8; 2048];
-    let serialized = serialize(&outer, &mut buf);
+    let serialized = serialize(&outer, &mut buf).unwrap();
     let decoded: HashMap<String, HashMap<String, u32>> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 2);
@@ -255,7 +255,7 @@ fn btreemap_basic() {
     map.insert(3u32, "three".to_string());
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: BTreeMap<u32, String> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 3);
@@ -271,7 +271,7 @@ fn btreemap_empty() {
     let map: BTreeMap<u32, String> = BTreeMap::new();
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: BTreeMap<u32, String> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 0);
@@ -289,7 +289,7 @@ fn btreemap_ordering() {
     map.insert(2u32, "two".to_string());
 
     let mut buf = vec![0u8; 1024];
-    let serialized = serialize(&map, &mut buf);
+    let serialized = serialize(&map, &mut buf).unwrap();
     let decoded: BTreeMap<u32, String> = deserialize(serialized).unwrap();
 
     // Check that iteration order is maintained (sorted)

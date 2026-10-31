@@ -12,12 +12,12 @@ fn serialize_to_vec_test() {
     let point = Point { x: 42, y: 100 };
 
     // Use serialize_to_vec
-    let bytes = vercode::serialize_to_vec(&point);
+    let bytes = vercode::serialize_to_vec(&point).unwrap();
 
     // Verify we can deserialize it back
     let decoded: Point = deserialize(&bytes).unwrap();
     assert_eq!(decoded, point);
 
     // Verify the size is correct
-    assert_eq!(bytes.len(), vercode::size(&point));
+    assert_eq!(bytes.len(), vercode::size(&point).unwrap());
 }
