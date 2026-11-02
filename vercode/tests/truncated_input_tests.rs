@@ -12,16 +12,16 @@ struct Oversize;
 impl VerCodable for Oversize {
     const MAX_VERSION: u32 = 0;
 
-    fn write_version(&self, _version: u32, _buf: &mut [u8]) -> usize {
-        0
+    fn write_version(&self, _version: u32, _buf: &mut [u8]) -> Result<usize, InvalidEncoding> {
+        Ok(0)
     }
 
     fn read_version(_version: u32, _buf: &[u8]) -> Result<(Self, usize), InvalidEncoding> {
         Ok((Oversize, usize::MAX))
     }
 
-    fn size_version(&self, _version: u32) -> usize {
-        0
+    fn size_version(&self, _version: u32) -> Result<usize, InvalidEncoding> {
+        Ok(0)
     }
 }
 

@@ -133,16 +133,16 @@ fn generate_field_writes(
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            writes.push(quote! { if version < #v { return offset; } });
+            writes.push(quote! { if version < #v { return Ok(offset); } });
         }
 
         for field in &batch.fields {
             let write_stmt = if is_named {
                 let ident = field.ident.unwrap();
-                quote! { offset += ::vercode::VerCodable::write_version(&self.#ident, version, &mut buf[offset..]); }
+                quote! { offset += ::vercode::VerCodable::write_version(&self.#ident, version, &mut buf[offset..])?; }
             } else {
                 let idx = syn::Index::from(field.index);
-                quote! { offset += ::vercode::VerCodable::write_version(&self.#idx, version, &mut buf[offset..]); }
+                quote! { offset += ::vercode::VerCodable::write_version(&self.#idx, version, &mut buf[offset..])?; }
             };
             writes.push(write_stmt);
         }
@@ -159,16 +159,24 @@ fn generate_field_sizes(batches: &[VersionBatch], is_named: bool) -> Vec<proc_ma
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            sizes.push(quote! { if version < #v { return total; } });
+            sizes.push(quote! { if version < #v { return Ok(total); } });
         }
 
         for field in &batch.fields {
             let size_stmt = if is_named {
                 let ident = field.ident.unwrap();
-                quote! { total += ::vercode::VerCodable::size_version(&self.#ident, version); }
+                quote! {
+                    total = total.checked_add(::vercode::VerCodable::size_version(&self.#ident, version)?)
+                        .ok_or(::vercode::InvalidEncoding)?;
+                    ::core::primitive::u32::try_from(total).map_err(|_| ::vercode::InvalidEncoding)?;
+                }
             } else {
                 let idx = syn::Index::from(field.index);
-                quote! { total += ::vercode::VerCodable::size_version(&self.#idx, version); }
+                quote! {
+                    total = total.checked_add(::vercode::VerCodable::size_version(&self.#idx, version)?)
+                        .ok_or(::vercode::InvalidEncoding)?;
+                    ::core::primitive::u32::try_from(total).map_err(|_| ::vercode::InvalidEncoding)?;
+                }
             };
             sizes.push(size_stmt);
         }
@@ -286,22 +294,28 @@ fn calculate_max_version_expr(field_infos: &[FieldInfo]) -> proc_macro2::TokenSt
 
 /// Variant information for enum processing
 struct VariantInfo<'a> {
-    index: usize,
+    index: u16,
     variant: &'a syn::Variant,
     field_infos: Vec<FieldInfo<'a>>,
     batches: Vec<VersionBatch<'a>>,
 }
 
 impl<'a> VariantInfo<'a> {
-    fn new(index: usize, variant: &'a syn::Variant) -> Self {
+    fn new(index: usize, variant: &'a syn::Variant) -> syn::Result<Self> {
+        let index = u16::try_from(index).map_err(|_| {
+            syn::Error::new_spanned(
+                &variant.ident,
+                "Vercode supports at most 65536 enum variants",
+            )
+        })?;
         let field_infos = extract_field_info(&variant.fields);
         let batches = create_version_batches(field_infos.clone());
-        VariantInfo {
+        Ok(VariantInfo {
             index,
             variant,
             field_infos,
             batches,
-        }
+        })
     }
 
     fn max_version_expr(&self) -> proc_macro2::TokenStream {
@@ -385,13 +399,13 @@ impl<'a> VariantInfo<'a> {
 
     /// Generate write arm for this variant
     fn write_arm(&self, enum_name: &syn::Ident) -> proc_macro2::TokenStream {
-        let idx_u32 = self.index as u32;
+        let index = self.index;
         let pattern = self.match_pattern(enum_name);
         let field_writes = generate_variant_field_writes(&self.batches);
 
         quote! {
             #pattern => {
-                buf[offset..offset+2].copy_from_slice(&(#idx_u32 as u16).to_le_bytes());
+                buf[offset..offset+2].copy_from_slice(&#index.to_le_bytes());
                 offset += 2;
                 #(#field_writes)*
             }
@@ -412,12 +426,12 @@ impl<'a> VariantInfo<'a> {
 
     /// Generate read arm for this variant
     fn read_arm(&self, enum_name: &syn::Ident) -> proc_macro2::TokenStream {
-        let idx_u32 = self.index as u32;
+        let index = self.index;
         let reads = generate_field_reads(&self.batches);
         let construction = self.construct_variant(enum_name);
 
         quote! {
-            #idx_u32 => {
+            #index => {
                 #(#reads)*
                 #construction
             }
@@ -434,13 +448,13 @@ fn generate_variant_field_writes(batches: &[VersionBatch]) -> Vec<proc_macro2::T
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            writes.push(quote! { if version < #v { return offset; } });
+            writes.push(quote! { if version < #v { return Ok(offset); } });
         }
 
         for field in &batch.fields {
             let temp_var = field.temp_var();
             writes.push(quote! {
-                offset += ::vercode::VerCodable::write_version(#temp_var, version, &mut buf[offset..]);
+                offset += ::vercode::VerCodable::write_version(#temp_var, version, &mut buf[offset..])?;
             });
         }
     }
@@ -456,13 +470,15 @@ fn generate_variant_field_sizes(batches: &[VersionBatch]) -> Vec<proc_macro2::To
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            sizes.push(quote! { if version < #v { return total; } });
+            sizes.push(quote! { if version < #v { return Ok(total); } });
         }
 
         for field in &batch.fields {
             let temp_var = field.temp_var();
             sizes.push(quote! {
-                total += ::vercode::VerCodable::size_version(#temp_var, version);
+                total = total.checked_add(::vercode::VerCodable::size_version(#temp_var, version)?)
+                    .ok_or(::vercode::InvalidEncoding)?;
+                ::core::primitive::u32::try_from(total).map_err(|_| ::vercode::InvalidEncoding)?;
             });
         }
     }
@@ -505,7 +521,7 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
             const MAX_VERSION: u32 = <#inner_type as ::vercode::VerCodable>::MAX_VERSION;
 
             #[inline(always)]
-            fn write_version(&self, version: u32, buf: &mut [u8]) -> usize {
+            fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 ::vercode::VerCodable::write_version(&self.#field_accessor, version, buf)
             }
 
@@ -516,12 +532,12 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
             }
 
             #[inline(always)]
-            fn size_version(&self, version: u32) -> usize {
+            fn size_version(&self, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 ::vercode::VerCodable::size_version(&self.#field_accessor, version)
             }
 
             #[inline(always)]
-            fn write_option(this: Option<&Self>, version: u32, buf: &mut [u8]) -> usize {
+            fn write_option(this: Option<&Self>, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 ::vercode::VerCodable::write_option(
                     this.map(|this| &this.#field_accessor),
                     version,
@@ -537,7 +553,7 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
             }
 
             #[inline(always)]
-            fn size_option_version(this: &Option<Self>, version: u32) -> usize {
+            fn size_option_version(this: &Option<Self>, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 let inner_option = this.as_ref().map(|this| this.#field_accessor);
                 <#inner_type as ::vercode::VerCodable>::size_option_version(&inner_option, version)
             }
@@ -592,12 +608,14 @@ fn derive_struct(
             const MAX_VERSION: u32 = #max_version_expr;
 
             #[inline(always)]
-            fn write_version(&self, version: u32, buf: &mut [u8]) -> usize {
-                let total_data = self.size_version(version);
-                buf[..4].copy_from_slice(&(total_data as u32).to_le_bytes());
+            fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
+                let total_data = self.size_version(version)?;
+                let length = ::core::primitive::u32::try_from(total_data)
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
                 #(#writes)*
-                offset
+                Ok(offset)
             }
 
             #[inline(always)]
@@ -617,10 +635,10 @@ fn derive_struct(
             }
 
             #[inline(always)]
-            fn size_version(&self, version: u32) -> usize {
+            fn size_version(&self, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 let mut total = 4usize;
                 #(#sizes)*
-                total
+                Ok(total)
             }
         }
     };
@@ -635,11 +653,15 @@ fn derive_enum(
     variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>,
 ) -> TokenStream {
     // Process all variants once
-    let variant_infos: Vec<VariantInfo> = variants
+    let variant_infos = variants
         .iter()
         .enumerate()
         .map(|(idx, variant)| VariantInfo::new(idx, variant))
-        .collect();
+        .collect::<syn::Result<Vec<VariantInfo>>>();
+    let variant_infos = match variant_infos {
+        Ok(infos) => infos,
+        Err(error) => return error.into_compile_error().into(),
+    };
 
     // Calculate max version expression
     // Generate const expression that computes max across all variants
@@ -674,14 +696,16 @@ fn derive_enum(
             const MAX_VERSION: u32 = #max_version_expr;
 
             #[inline(always)]
-            fn write_version(&self, version: u32, buf: &mut [u8]) -> usize {
-                let total_data = self.size_version(version);
-                buf[..4].copy_from_slice(&(total_data as u32).to_le_bytes());
+            fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
+                let total_data = self.size_version(version)?;
+                let length = ::core::primitive::u32::try_from(total_data)
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
                 match self {
                     #(#write_arms)*
                 }
-                offset
+                Ok(offset)
             }
 
             #[inline(always)]
@@ -699,7 +723,7 @@ fn derive_enum(
                     .ok_or(::vercode::InvalidEncoding)?
                     .try_into()
                     .map_err(|_| ::vercode::InvalidEncoding)?;
-                let discriminant = u16::from_le_bytes(tag) as u32;
+                let discriminant = u16::from_le_bytes(tag);
                 let mut offset = 6usize;
 
                 let result = match discriminant {
@@ -710,15 +734,39 @@ fn derive_enum(
             }
 
             #[inline(always)]
-            fn size_version(&self, version: u32) -> usize {
+            fn size_version(&self, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
                 let mut total = 6usize; // length prefix (4 bytes) + discriminant (2 bytes)
                 match self {
                     #(#size_arms)*
                 }
-                total
+                Ok(total)
             }
         }
     };
 
     TokenStream::from(expanded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VariantInfo;
+
+    #[test]
+    fn enum_indices_preserve_the_u16_boundary() {
+        let variant = syn::parse_quote!(Value);
+        assert_eq!(VariantInfo::new(0, &variant).unwrap().index, 0);
+        assert_eq!(
+            VariantInfo::new(usize::from(u16::MAX), &variant)
+                .unwrap()
+                .index,
+            u16::MAX
+        );
+        for index in [usize::from(u16::MAX) + 1, usize::MAX] {
+            let error = VariantInfo::new(index, &variant).err().unwrap();
+            assert_eq!(
+                error.to_string(),
+                "Vercode supports at most 65536 enum variants"
+            );
+        }
+    }
 }

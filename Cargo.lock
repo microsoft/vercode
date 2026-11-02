@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "vercode"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "criterion",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "vercode-macros"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",

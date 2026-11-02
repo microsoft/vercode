@@ -8,7 +8,7 @@ fn socketaddr_v4() {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&addr, &mut buf);
+    let serialized = serialize(&addr, &mut buf).unwrap();
     let decoded: SocketAddr = deserialize(serialized).unwrap();
 
     assert_eq!(decoded, addr);
@@ -25,7 +25,7 @@ fn socketaddr_v6() {
     );
 
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&addr, &mut buf);
+    let serialized = serialize(&addr, &mut buf).unwrap();
     let decoded: SocketAddr = deserialize(serialized).unwrap();
 
     assert_eq!(decoded, addr);
@@ -46,7 +46,7 @@ fn socketaddr_v6_with_flowinfo_and_scope() {
     let socket_addr = std::net::SocketAddr::V6(addr);
 
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&socket_addr, &mut buf);
+    let serialized = serialize(&socket_addr, &mut buf).unwrap();
     let decoded: std::net::SocketAddr = deserialize(serialized).unwrap();
 
     assert_eq!(decoded, socket_addr);
@@ -67,14 +67,14 @@ fn socketaddr_localhost_variants() {
     // IPv4 localhost
     let v4_localhost = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000);
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&v4_localhost, &mut buf);
+    let serialized = serialize(&v4_localhost, &mut buf).unwrap();
     let decoded: SocketAddr = deserialize(serialized).unwrap();
     assert_eq!(decoded, v4_localhost);
 
     // IPv6 localhost
     let v6_localhost = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 3000);
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&v6_localhost, &mut buf);
+    let serialized = serialize(&v6_localhost, &mut buf).unwrap();
     let decoded: SocketAddr = deserialize(serialized).unwrap();
     assert_eq!(decoded, v6_localhost);
 }
@@ -97,7 +97,7 @@ fn socketaddr_in_struct() {
     };
 
     let mut buf = vec![0u8; 256];
-    let serialized = serialize(&server, &mut buf);
+    let serialized = serialize(&server, &mut buf).unwrap();
     let decoded: Server = deserialize(serialized).unwrap();
 
     assert_eq!(decoded, server);
@@ -115,7 +115,7 @@ fn socketaddr_vec() {
     ];
 
     let mut buf = vec![0u8; 512];
-    let serialized = serialize(&addrs, &mut buf);
+    let serialized = serialize(&addrs, &mut buf).unwrap();
     let decoded: Vec<SocketAddr> = deserialize(serialized).unwrap();
 
     assert_eq!(decoded.len(), 3);

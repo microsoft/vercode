@@ -11,7 +11,7 @@ fn transparent_newtype() {
 
     let user_id = UserId(12345);
     let mut buf = [0u8; 32];
-    let serialized = serialize(&user_id, &mut buf);
+    let serialized = serialize(&user_id, &mut buf).unwrap();
 
     // Should be just 4 bytes for u32, no length prefix or wrapper overhead
     assert_eq!(serialized.len(), 4);
@@ -41,12 +41,12 @@ fn transparent_newtype_with_versioned_inner() {
     let mut buf0 = [0u8; 64];
 
     // Version 0: should write only id (2 bytes) + 4 byte length prefix = 6 bytes
-    let serialized_v0 = serialize_version(&wrapped, 0, &mut buf0);
+    let serialized_v0 = serialize_version(&wrapped, 0, &mut buf0).unwrap();
     assert_eq!(serialized_v0.len(), 6);
 
     // Version 1: should write id (2 bytes) + timestamp (8 bytes) + 4 byte length prefix = 14 bytes
     let mut buf1 = [0u8; 64];
-    let serialized_v1 = serialize_version(&wrapped, 1, &mut buf1);
+    let serialized_v1 = serialize_version(&wrapped, 1, &mut buf1).unwrap();
     assert_eq!(serialized_v1.len(), 14);
 
     // Test round-trip
@@ -67,7 +67,7 @@ fn transparent_named_field() {
 
     let score = Score { value: 42 };
     let mut buf = [0u8; 32];
-    let serialized = serialize(&score, &mut buf);
+    let serialized = serialize(&score, &mut buf).unwrap();
 
     // Should be just 4 bytes for u32, no overhead
     assert_eq!(serialized.len(), 4);
@@ -85,8 +85,8 @@ fn size_of_newtype_should_be_same_as_inner() {
 
     let new_type = NewType(42u32);
 
-    let size_struct = vercode::size(&42u32);
-    let size_newtype = vercode::size(&new_type);
+    let size_struct = vercode::size(&42u32).unwrap();
+    let size_newtype = vercode::size(&new_type).unwrap();
 
     // With VercodeTransparent, sizes should be identical (no length prefix overhead)
     assert_eq!(size_struct, size_newtype);

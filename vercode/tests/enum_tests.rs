@@ -13,7 +13,7 @@ fn enum_basic() {
 
     let a = SimpleEnum::A;
     let mut buf = [0u8; 32];
-    let serialized = serialize(&a, &mut buf);
+    let serialized = serialize(&a, &mut buf).unwrap();
     // 4 bytes length prefix + 2 bytes discriminant = 6
     assert_eq!(serialized.len(), 6);
     assert_eq!(&serialized[0..4], &(6u32.to_le_bytes()));
@@ -23,7 +23,7 @@ fn enum_basic() {
     assert_eq!(decoded, SimpleEnum::A);
 
     let b = SimpleEnum::B;
-    let serialized = serialize(&b, &mut buf);
+    let serialized = serialize(&b, &mut buf).unwrap();
     assert_eq!(serialized.len(), 6);
     assert_eq!(&serialized[4..6], &(1u16.to_le_bytes()));
 
@@ -47,14 +47,14 @@ fn enum_with_fields() {
     // Test Quit variant
     let quit = Message::Quit;
     let mut buf = [0u8; 64];
-    let serialized = serialize(&quit, &mut buf);
+    let serialized = serialize(&quit, &mut buf).unwrap();
     assert_eq!(serialized.len(), 6); // 4 + 2
     let decoded = deserialize::<Message>(serialized).unwrap();
     assert_eq!(decoded, Message::Quit);
 
     // Test Move variant
     let move_msg = Message::Move { x: 100, y: 200 };
-    let serialized = serialize(&move_msg, &mut buf);
+    let serialized = serialize(&move_msg, &mut buf).unwrap();
     // 4 (length) + 2 (discriminant) + 4 (x) + 4 (y) = 14
     assert_eq!(serialized.len(), 14);
     assert_eq!(&serialized[0..4], &(14u32.to_le_bytes()));
@@ -65,7 +65,7 @@ fn enum_with_fields() {
 
     // Test Write variant
     let write_msg = Message::Write(10, 20);
-    let serialized = serialize(&write_msg, &mut buf);
+    let serialized = serialize(&write_msg, &mut buf).unwrap();
     // 4 + 2 + 1 + 1 = 8
     assert_eq!(serialized.len(), 8);
     assert_eq!(&serialized[4..6], &(2u16.to_le_bytes())); // discriminant 2
@@ -98,7 +98,7 @@ fn enum_variant_with_field_versions() {
     let mut buf0 = [0u8; 64];
 
     // Version 0: variant not available, can't write it meaningfully
-    let serialized_v0 = serialize_version(&record, 0, &mut buf0);
+    let serialized_v0 = serialize_version(&record, 0, &mut buf0).unwrap();
     assert_eq!(serialized_v0.len(), 10);
 
     // Test round-trip at version 2
@@ -113,7 +113,7 @@ fn enum_variant_with_field_versions() {
 
     // Version 1: variant available but metadata field not yet
     let mut buf1 = [0u8; 64];
-    let serialized_v1 = serialize_version(&record, 1, &mut buf1);
+    let serialized_v1 = serialize_version(&record, 1, &mut buf1).unwrap();
     assert_eq!(serialized_v1.len(), 12);
 
     // Test round-trip at version 1 (can't test v0 since variant doesn't exist there)
@@ -171,7 +171,7 @@ fn enum_field_name_conflicts() {
     };
 
     let mut buf_array = [0u8; 128];
-    let serialized = serialize(&data, &mut buf_array);
+    let serialized = serialize(&data, &mut buf_array).unwrap();
 
     // 4 (length prefix) + 2 (discriminant) + 4 (length field) + 2 (offset field) +
     // 1 (total field) + 8 (version field) + 4 (buf field) + 2 (more field) = 27

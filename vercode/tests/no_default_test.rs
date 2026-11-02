@@ -17,9 +17,13 @@ impl NoDefault {
 impl VerCodable for NoDefault {
     const MAX_VERSION: u32 = 0;
 
-    fn write_version(&self, _version: u32, buf: &mut [u8]) -> usize {
+    fn write_version(
+        &self,
+        _version: u32,
+        buf: &mut [u8],
+    ) -> Result<usize, vercode::InvalidEncoding> {
         buf[0..4].copy_from_slice(&self.value.to_le_bytes());
-        4
+        Ok(4)
     }
 
     fn read_version(_version: u32, buf: &[u8]) -> Result<(Self, usize), vercode::InvalidEncoding> {
@@ -30,8 +34,8 @@ impl VerCodable for NoDefault {
         Ok((NoDefault { value }, 4))
     }
 
-    fn size_version(&self, _version: u32) -> usize {
-        4
+    fn size_version(&self, _version: u32) -> Result<usize, vercode::InvalidEncoding> {
+        Ok(4)
     }
 }
 
@@ -53,7 +57,7 @@ fn version_zero_no_default_struct() {
     };
 
     let mut buf = [0u8; 128];
-    let serialized = serialize(&original, &mut buf);
+    let serialized = serialize(&original, &mut buf).unwrap();
 
     let decoded = deserialize::<TestStruct>(serialized).unwrap();
     assert_eq!(decoded.base.value, 42);
@@ -80,7 +84,7 @@ fn version_zero_no_default_enum() {
     };
 
     let mut buf = [0u8; 128];
-    let serialized = serialize(&original, &mut buf);
+    let serialized = serialize(&original, &mut buf).unwrap();
 
     let decoded = deserialize::<TestEnum>(serialized).unwrap();
 
@@ -104,7 +108,7 @@ fn version_zero_fields_always_read() {
     };
 
     let mut buf = [0u8; 128];
-    let serialized = serialize(&original, &mut buf);
+    let serialized = serialize(&original, &mut buf).unwrap();
 
     // This should succeed because version 0 fields are always read
     let decoded = deserialize::<AlwaysPresent>(serialized).unwrap();
@@ -133,7 +137,7 @@ fn multiple_version_zero_fields_no_default() {
     };
 
     let mut buf = [0u8; 256];
-    let serialized = serialize(&original, &mut buf);
+    let serialized = serialize(&original, &mut buf).unwrap();
     let decoded = deserialize::<MultiBase>(serialized).unwrap();
 
     assert_eq!(decoded.first.value, 111);

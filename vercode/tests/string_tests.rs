@@ -5,7 +5,7 @@ use vercode::{VerCodable, Vercode, deserialize, serialize};
 fn string_serialization() {
     let text = String::from("Hello, World!");
     let mut buf = [0u8; 128];
-    let serialized = serialize(&text, &mut buf);
+    let serialized = serialize(&text, &mut buf).unwrap();
 
     // 4 bytes length prefix + 13 bytes of UTF-8 data = 17
     assert_eq!(serialized.len(), 17);
@@ -20,7 +20,7 @@ fn string_serialization() {
 fn string_empty() {
     let text = String::new();
     let mut buf = [0u8; 128];
-    let serialized = serialize(&text, &mut buf);
+    let serialized = serialize(&text, &mut buf).unwrap();
 
     // 4 bytes length prefix + 0 bytes of data = 4
     assert_eq!(serialized.len(), 4);
@@ -34,7 +34,7 @@ fn string_empty() {
 fn string_unicode() {
     let text = String::from("Hello 世界 🦀");
     let mut buf = [0u8; 128];
-    let serialized = serialize(&text, &mut buf);
+    let serialized = serialize(&text, &mut buf).unwrap();
 
     let decoded = deserialize::<String>(serialized).unwrap();
     assert_eq!(decoded, text);
@@ -54,7 +54,7 @@ fn struct_with_string() {
     };
 
     let mut buf = [0u8; 256];
-    let serialized = serialize(&person, &mut buf);
+    let serialized = serialize(&person, &mut buf).unwrap();
     let decoded = deserialize::<Person>(serialized).unwrap();
 
     assert_eq!(decoded, person);

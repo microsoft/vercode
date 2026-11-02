@@ -11,9 +11,9 @@ fn size_test() {
     }
 
     let st = SizeTest { a: 0x1234, d: 0x56 };
-    assert_eq!(st.size_version(0), 5); // only d (1 byte) + 4 byte length prefix
-    assert_eq!(st.size_version(1), 7); // a (2 bytes) + d (1 byte) + 4 byte length prefix
-    assert_eq!(vercode::size(&st), 7);
+    assert_eq!(st.size_version(0).unwrap(), 5); // only d (1 byte) + 4 byte length prefix
+    assert_eq!(st.size_version(1).unwrap(), 7); // a (2 bytes) + d (1 byte) + 4 byte length prefix
+    assert_eq!(vercode::size(&st).unwrap(), 7);
 }
 
 #[derive(Default, Vercode, Debug, PartialEq, Clone)]
@@ -36,7 +36,7 @@ fn version_ordering() {
         d: 40,
     };
     let mut buf = [0u8; 16];
-    let serialized = serialize(&v, &mut buf);
+    let serialized = serialize(&v, &mut buf).unwrap();
 
     // 4 bytes of data + 4 bytes length prefix = 8
     assert_eq!(serialized.len(), 8);
@@ -67,7 +67,7 @@ fn nested_versions() {
         y: Inner { a: 30, b: 40 },
     };
     let mut buf = [0u8; 32];
-    let serialized = serialize(&o, &mut buf);
+    let serialized = serialize(&o, &mut buf).unwrap();
     // Outer: 4 (length) + 4 (y length) + 2 (y data) + 4 (x length) + 2 (x data) = 16
     assert_eq!(serialized.len(), 16);
     assert_eq!(&serialized[0..4], &(16u32.to_le_bytes()));
@@ -88,7 +88,7 @@ fn round_trip_nested() {
         y: Inner { a: 30, b: 40 },
     };
     let mut buf = [0u8; 32];
-    let serialized = serialize(&original, &mut buf);
+    let serialized = serialize(&original, &mut buf).unwrap();
     let decoded = deserialize::<Outer>(serialized).expect("deserialize ok");
     assert_eq!(decoded, original);
 }
@@ -102,30 +102,30 @@ fn size_version_matches_write_version() {
         d: 40,
     };
     let mut buf = [0u8; 16];
-    let s0 = serialize_version(&cv, 0, &mut buf);
+    let s0 = serialize_version(&cv, 0, &mut buf).unwrap();
     assert_eq!(s0.len(), 6);
-    assert_eq!(cv.size_version(0), s0.len());
-    let s1 = serialize_version(&cv, 1, &mut buf);
+    assert_eq!(cv.size_version(0).unwrap(), s0.len());
+    let s1 = serialize_version(&cv, 1, &mut buf).unwrap();
     assert_eq!(s1.len(), 7);
-    assert_eq!(cv.size_version(1), s1.len());
-    let s2 = serialize_version(&cv, 2, &mut buf);
+    assert_eq!(cv.size_version(1).unwrap(), s1.len());
+    let s2 = serialize_version(&cv, 2, &mut buf).unwrap();
     assert_eq!(s2.len(), 8);
-    assert_eq!(cv.size_version(2), s2.len());
+    assert_eq!(cv.size_version(2).unwrap(), s2.len());
 
     let o = Outer {
         x: Inner { a: 10, b: 20 },
         y: Inner { a: 30, b: 40 },
     };
     let mut buf2 = [0u8; 32];
-    let sv0 = serialize_version(&o, 0, &mut buf2);
+    let sv0 = serialize_version(&o, 0, &mut buf2).unwrap();
     assert_eq!(sv0.len(), 9);
-    assert_eq!(o.size_version(0), sv0.len());
-    let sv1 = serialize_version(&o, 1, &mut buf2);
+    assert_eq!(o.size_version(0).unwrap(), sv0.len());
+    let sv1 = serialize_version(&o, 1, &mut buf2).unwrap();
     assert_eq!(sv1.len(), 16);
-    assert_eq!(o.size_version(1), sv1.len());
-    let sv2 = serialize_version(&o, 2, &mut buf2);
+    assert_eq!(o.size_version(1).unwrap(), sv1.len());
+    let sv2 = serialize_version(&o, 2, &mut buf2).unwrap();
     assert_eq!(sv2.len(), 16);
-    assert_eq!(o.size_version(2), sv2.len());
+    assert_eq!(o.size_version(2).unwrap(), sv2.len());
 }
 
 #[test]

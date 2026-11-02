@@ -20,12 +20,13 @@ enum Event {
 }
 
 fn check_frame<T: VerCodable + std::fmt::Debug + PartialEq>(value: T) {
-    let bytes = serialize_to_vec(&value);
+    let bytes = serialize_to_vec(&value).unwrap();
     for end in 0..bytes.len() {
         assert_eq!(deserialize::<T>(&bytes[..end]), Err(InvalidEncoding));
     }
 
-    for length in (0..bytes.len() as u32).chain([bytes.len() as u32 + 1, u32::MAX]) {
+    let encoded_len = u32::try_from(bytes.len()).unwrap();
+    for length in (0..encoded_len).chain([encoded_len + 1, u32::MAX]) {
         let mut invalid = bytes.clone();
         invalid[..4].copy_from_slice(&length.to_le_bytes());
         assert_eq!(
@@ -85,7 +86,8 @@ fn structs_consume_unknown_fields_before_the_next_value() {
     let bytes = serialize_to_vec(&New {
         value: 7,
         extra: 42,
-    });
+    })
+    .unwrap();
     assert_eq!(
         Old::read_version(0, &bytes),
         Ok((Old { value: 7 }, bytes.len()))
@@ -95,7 +97,7 @@ fn structs_consume_unknown_fields_before_the_next_value() {
         Ok((New { value: 7, extra: 0 }, bytes.len()))
     );
     assert_eq!(
-        deserialize::<New>(&serialize_to_vec(&Old { value: 7 })),
+        deserialize::<New>(&serialize_to_vec(&Old { value: 7 }).unwrap()),
         Ok(New { value: 7, extra: 0 })
     );
 
@@ -107,7 +109,7 @@ fn structs_consume_unknown_fields_before_the_next_value() {
         tail: 99,
     };
     assert_eq!(
-        deserialize::<Envelope<Old>>(&serialize_to_vec(&envelope)),
+        deserialize::<Envelope<Old>>(&serialize_to_vec(&envelope).unwrap()),
         Ok(Envelope {
             inner: Old { value: 7 },
             tail: 99
@@ -125,17 +127,20 @@ fn structs_consume_unknown_fields_before_the_next_value() {
         },
     ];
     assert_eq!(
-        deserialize::<Vec<Old>>(&serialize_to_vec(&items)),
+        deserialize::<Vec<Old>>(&serialize_to_vec(&items).unwrap()),
         Ok(vec![Old { value: 7 }, Old { value: 8 }])
     );
     assert_eq!(
-        deserialize::<(Option<Old>, u32)>(&serialize_to_vec(&(
-            Some(New {
-                value: 7,
-                extra: 42
-            }),
-            99u32
-        ))),
+        deserialize::<(Option<Old>, u32)>(
+            &serialize_to_vec(&(
+                Some(New {
+                    value: 7,
+                    extra: 42
+                }),
+                99u32
+            ))
+            .unwrap()
+        ),
         Ok((Some(Old { value: 7 }), 99))
     );
 }
@@ -176,18 +181,18 @@ fn enums_consume_unknown_fields_before_the_next_value() {
             NewEvent::Named { value: 7, extra: 0 },
         ),
     ] {
-        let bytes = serialize_to_vec(&new);
+        let bytes = serialize_to_vec(&new).unwrap();
         assert_eq!(
             NewEvent::read_version(0, &bytes),
             Ok((defaulted, bytes.len()))
         );
         assert_eq!(
-            deserialize::<(OldEvent, u32)>(&serialize_to_vec(&(new, 99u32))),
+            deserialize::<(OldEvent, u32)>(&serialize_to_vec(&(new, 99u32)).unwrap()),
             Ok((old, 99))
         );
     }
     assert_eq!(
-        deserialize::<NewEvent>(&serialize_to_vec(&OldEvent::Tuple(7))),
+        deserialize::<NewEvent>(&serialize_to_vec(&OldEvent::Tuple(7)).unwrap()),
         Ok(NewEvent::Tuple(7, 0))
     );
 }
@@ -209,7 +214,8 @@ fn nested_frames_cannot_read_past_the_parent_frame() {
     let mut bytes = serialize_to_vec(&Envelope {
         inner: Old { value: 7 },
         tail: 99,
-    });
+    })
+    .unwrap();
     bytes[..4].copy_from_slice(&8u32.to_le_bytes());
     assert_eq!(deserialize::<Envelope<Old>>(&bytes), Err(InvalidEncoding));
 }
@@ -229,11 +235,12 @@ fn a_partial_version_batch_is_not_defaulted_or_read_from_the_next_frame() {
         value: 7,
         first: 8,
         second: 9,
-    });
+    })
+    .unwrap();
     bytes[..4].copy_from_slice(&6u32.to_le_bytes());
     assert_eq!(deserialize::<Batch>(&bytes), Err(InvalidEncoding));
 
-    let mut bytes = serialize_to_vec(&NewEvent::Tuple(7, 42));
+    let mut bytes = serialize_to_vec(&NewEvent::Tuple(7, 42)).unwrap();
     bytes[..4].copy_from_slice(&8u32.to_le_bytes());
     assert_eq!(deserialize::<NewEvent>(&bytes), Err(InvalidEncoding));
 }

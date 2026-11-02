@@ -178,14 +178,14 @@ pub fn benchmark(c: &mut criterion::Criterion) {
 
         b.iter(|| {
             let mut local = [0u8; 4096];
-            let _encoded = std::hint::black_box(vercode::serialize(&buffer, &mut local));
+            let _encoded = std::hint::black_box(vercode::serialize(&buffer, &mut local).unwrap());
         });
     });
 
     c.bench_function("vercode_deserialize_vec_u8", |b| {
         let buffer = vec![42u32; 512];
         let mut local = [0u8; 4096];
-        let encoded = std::hint::black_box(vercode::serialize(&buffer, &mut local));
+        let encoded = std::hint::black_box(vercode::serialize(&buffer, &mut local).unwrap());
 
         b.iter(|| {
             let _result = std::hint::black_box(vercode::deserialize::<Vec<u32>>(encoded));
@@ -195,16 +195,15 @@ pub fn benchmark(c: &mut criterion::Criterion) {
     c.bench_function("example_vercode_serialize", |b| {
         b.iter(|| {
             let mut local = [0u8; 256];
-            std::hint::black_box(vercode::serialize(
-                std::hint::black_box(get_example()),
-                &mut local,
-            ));
+            std::hint::black_box(
+                vercode::serialize(std::hint::black_box(get_example()), &mut local).unwrap(),
+            );
         });
     });
 
     c.bench_function("example_vercode_deserialize", |b| {
         let mut local = [0u8; 256];
-        let local = std::hint::black_box(vercode::serialize(&EXAMPLE, &mut local));
+        let local = std::hint::black_box(vercode::serialize(&EXAMPLE, &mut local).unwrap());
 
         b.iter(|| {
             let _result = std::hint::black_box(vercode::deserialize::<E>(local));
@@ -240,7 +239,7 @@ pub fn benchmark(c: &mut criterion::Criterion) {
     c.bench_function("hashmap_vercode_roundtrip", |b| {
         b.iter(|| {
             let mut local = [0u8; 2048];
-            let encoded = std::hint::black_box(vercode::serialize(&hashmap, &mut local));
+            let encoded = std::hint::black_box(vercode::serialize(&hashmap, &mut local).unwrap());
             let _result = std::hint::black_box(vercode::deserialize::<HashMap<u32, u32>>(encoded));
         });
     });

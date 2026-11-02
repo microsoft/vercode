@@ -2,6 +2,26 @@
 
 This changelog covers `vercode` and `vercode-macros`.
 
+## 0.6.0
+
+- **Breaking:** `serialize`, `serialize_version`, `serialize_to_vec`, `size`,
+  and `size_version` now return `Result`, with `InvalidEncoding` as the error type.
+  Custom `VerCodable` implementations must update `write_version` and
+  `size_version`, plus any overrides of `write_option` and `size_option_version`,
+  to return `Result<usize, InvalidEncoding>`.
+- Reject string lengths, collection counts, and derived frame sizes greater
+  than `u32::MAX` instead of silently truncating their length fields.
+- Return `InvalidEncoding` for encoded-size arithmetic overflow and propagate
+  nested serialization and size errors.
+- Check the encoded size before `serialize_to_vec` allocates its output buffer.
+- Reject derived `Vercode` enums with more than 65536 variants at compile time.
+- Add regression tests for length boundaries, oversized values, arithmetic
+  overflow, nested errors, and version filtering.
+
+Valid values retain the same wire format.
+Buffer-based serializers still require sufficient output space and can panic
+if the buffer is too small. An error can leave the output buffer partially written.
+
 ## 0.5.5
 
 - Return `InvalidEncoding` for truncated booleans and fixed-width primitives,

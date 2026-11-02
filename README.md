@@ -20,8 +20,27 @@ The [revision](https://docs.rs/revision/latest/revision/) crate addresses simila
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-vercode = { version = "0.5" }
+vercode = { version = "0.6" }
 ```
+
+## Serialization errors in 0.6
+
+`serialize`, `serialize_version`, and `serialize_to_vec` now return `Result`.
+The `size` and `size_version` functions also return `Result`.
+The error type is `InvalidEncoding`.
+
+Custom `VerCodable` implementations must return `Result<usize, InvalidEncoding>`
+from `write_version` and `size_version`. Overrides of `write_option` and
+`size_option_version` use the same return type. Callers can propagate errors
+with `?` or handle them explicitly.
+
+Lengths that exceed the wire format limits return `Err(InvalidEncoding)`
+instead of silently truncating. Size calculations also reject arithmetic overflow.
+`serialize_to_vec` checks the encoded size before it allocates its output buffer.
+Valid values retain the same wire format.
+
+Buffer-based serializers still require sufficient output space and can panic
+if the buffer is too small. An error can leave the output buffer partially written.
 
 ## Collection decoding
 
@@ -43,8 +62,9 @@ Here's a complete example showing structs, enums, and version evolution:
 use vercode::{Vercode, serialize, deserialize};
 
 // Enum with versioned fields in variants
-#[derive(Vercode, Debug, PartialEq)]
+#[derive(Vercode, Default, Debug, PartialEq)]
 enum Message {
+    #[default]
     Quit,
     Move { x: i32, y: i32 },
     Write(String),
@@ -62,7 +82,6 @@ enum Message {
 
 // Struct that evolved over three versions
 #[derive(Vercode, Default, Debug, PartialEq)]
-#[vercode(max_version = 2)]
 struct User {
     // Version 0 fields (always present, no Default required)
     id: u32,
@@ -90,15 +109,15 @@ let user = User {
 };
 
 let mut buf = vec![0u8; 1024];
-let serialized = serialize(&user, &mut buf);
+let serialized = serialize(&user, &mut buf).unwrap();
 
 // Deserialize - automatically handles version differences
-let decoded: User = deserialize(serialized);
+let decoded: User = deserialize(serialized).unwrap();
 assert_eq!(decoded, user);
 
 // Simulate old version (v0) reading new data
-let old_data = vercode::serialize_version(&user, 0, &mut buf);
-let old_user: User = deserialize(old_data);
+let old_data = vercode::serialize_version(&user, 0, &mut buf).unwrap();
+let old_user: User = deserialize(old_data).unwrap();
 // Fields from v1+ will be Default::default()
 assert_eq!(old_user.id, 42);
 assert_eq!(old_user.name, "Alice");
@@ -138,7 +157,7 @@ enum Mode {
     Unknown = 255,
 }
 
-assert_eq!(serialize_to_vec(&Mode::Normal), vec![0]);
+assert_eq!(serialize_to_vec(&Mode::Normal).unwrap(), vec![0]);
 assert_eq!(deserialize::<Mode>(&[42]).unwrap(), Mode::Unknown);
 ```
 
@@ -208,8 +227,10 @@ Tuples of size 1 to 10 consisting of elements that are in this list
 
 ## Limitations
 
-- Maximum of 2^16 variants per enum
-- Maximum of 2^32 bytes per struct or enum
+- Maximum of 65,536 variants per derived enum. The derive rejects larger enums at compile time.
+- Maximum of `u32::MAX` bytes per struct or enum, including the header.
+- Maximum of `u32::MAX` bytes per string or elements per collection.
+- The total encoded size must fit in `usize`.
 
 ## Breaking Changes
 

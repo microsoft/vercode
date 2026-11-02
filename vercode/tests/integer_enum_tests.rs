@@ -53,14 +53,14 @@ macro_rules! integer_enum_tests {
 
                 for mode in [NewMode::Normal, NewMode::Turbo, NewMode::Unknown] {
                     let code: $int = mode.into();
-                    let bytes = serialize_to_vec(&mode);
+                    let bytes = serialize_to_vec(&mode).unwrap();
                     assert_eq!(bytes, code.to_le_bytes());
-                    assert_eq!(size(&mode), size(&code));
+                    assert_eq!(size(&mode).unwrap(), size(&code).unwrap());
                     assert_eq!(deserialize::<NewMode>(&bytes).unwrap(), mode);
                     // Versions do not change the integer encoding or read size.
                     for version in [0, 1, u32::MAX] {
                         let mut buf = [0u8; 8];
-                        assert_eq!(serialize_version(&mode, version, &mut buf), bytes);
+                        assert_eq!(serialize_version(&mode, version, &mut buf).unwrap(), bytes);
                         assert_eq!(
                             NewMode::read_version(version, &bytes).unwrap(),
                             (mode, bytes.len())
@@ -77,9 +77,9 @@ macro_rules! integer_enum_tests {
                     (NewMode::Unknown, OldMode::Unknown),
                 ] {
                     let original = NewConfig { mode, retries: 42 };
-                    let bytes = serialize_to_vec(&original);
-                    assert_eq!(bytes.len(), 4 + size(&mode) + 4);
-                    assert_eq!(size(&original), bytes.len());
+                    let bytes = serialize_to_vec(&original).unwrap();
+                    assert_eq!(bytes.len(), 4 + size(&mode).unwrap() + 4);
+                    assert_eq!(size(&original).unwrap(), bytes.len());
                     assert_eq!(deserialize::<NewConfig>(&bytes).unwrap(), original);
                     let old = deserialize::<OldConfig>(&bytes).unwrap();
                     assert_eq!(
@@ -89,7 +89,8 @@ macro_rules! integer_enum_tests {
                             retries: 42
                         }
                     );
-                    let forwarded = deserialize::<NewConfig>(&serialize_to_vec(&old)).unwrap();
+                    let forwarded =
+                        deserialize::<NewConfig>(&serialize_to_vec(&old).unwrap()).unwrap();
                     assert_eq!(forwarded.retries, 42);
                     // Unknown is a lossy fallback, not an open-enum payload.
                     assert_eq!(
@@ -106,7 +107,7 @@ macro_rules! integer_enum_tests {
             #[test]
             fn every_code_decodes_or_defaults() {
                 for code in $int::MIN..=$int::MAX {
-                    let bytes = serialize_to_vec(&code);
+                    let bytes = serialize_to_vec(&code).unwrap();
                     assert_eq!(
                         deserialize::<OldMode>(&bytes).unwrap(),
                         OldMode::try_from(code).unwrap_or_default()
@@ -120,7 +121,7 @@ macro_rules! integer_enum_tests {
 
             #[test]
             fn truncated_input_is_an_error_not_a_default() {
-                let bytes = serialize_to_vec(&NewMode::Turbo);
+                let bytes = serialize_to_vec(&NewMode::Turbo).unwrap();
                 for length in 0..bytes.len() {
                     assert_eq!(
                         deserialize::<OldMode>(&bytes[..length]),
@@ -136,13 +137,13 @@ macro_rules! integer_enum_tests {
             #[test]
             fn options_and_collections_use_integer_encoding() {
                 let source = vec![None, Some(NewMode::Turbo), Some(NewMode::Normal)];
-                let bytes = serialize_to_vec(&source);
+                let bytes = serialize_to_vec(&source).unwrap();
                 let decoded = deserialize::<Vec<Option<OldMode>>>(&bytes).unwrap();
                 assert_eq!(
                     decoded,
                     vec![None, Some(OldMode::Unknown), Some(OldMode::Normal)]
                 );
-                assert_eq!(size(&source), bytes.len());
+                assert_eq!(size(&source).unwrap(), bytes.len());
                 // A present but truncated option must not turn into Some(default).
                 assert_eq!(deserialize::<Option<OldMode>>(&[1]), Err(InvalidEncoding));
             }
@@ -160,7 +161,7 @@ macro_rules! integer_enum_tests {
                     mode: OldMode::Normal,
                 };
                 let mut buf = [0u8; 32];
-                let bytes = serialize_version(&config, 0, &mut buf);
+                let bytes = serialize_version(&config, 0, &mut buf).unwrap();
                 assert_eq!(
                     deserialize::<Config>(bytes).unwrap(),
                     Config {
@@ -191,5 +192,5 @@ fn fallback_uses_default_not_a_variant_name_or_zero() {
 
     assert_eq!(deserialize::<Mode>(&[42]).unwrap(), Mode::Disabled);
     assert_eq!(deserialize::<Mode>(&[255]).unwrap(), Mode::Unknown);
-    assert_eq!(serialize_to_vec(&Mode::default()), vec![7]);
+    assert_eq!(serialize_to_vec(&Mode::default()).unwrap(), vec![7]);
 }
