@@ -158,6 +158,7 @@ struct UserId(u64);
 ```
 
 `VercodeTransparent` requires a struct with exactly one field.
+The inner type does not need to implement `Copy` or `Clone`.
 `Vercode` supports structs and enums, but not unions.
 Unsupported derive targets produce compile errors that identify the type.
 
