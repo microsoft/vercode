@@ -1,6 +1,50 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 use vercode::{InvalidEncoding, VerCodable, Vercode, deserialize, serialize, serialize_to_vec};
 
+fn assert_integer_vector_wire_bytes<T>(items: Vec<T>, payload: &[u8])
+where
+    T: VerCodable + std::fmt::Debug + PartialEq + 'static,
+{
+    let mut expected = u32::try_from(items.len()).unwrap().to_le_bytes().to_vec();
+    expected.extend_from_slice(payload);
+    assert_eq!(serialize_to_vec(&items).unwrap(), expected);
+    for end in 0..expected.len() {
+        assert_eq!(
+            deserialize::<Vec<T>>(&expected[..end]),
+            Err(InvalidEncoding)
+        );
+    }
+    let (decoded, consumed) = Vec::<T>::read_version(0, &expected).unwrap();
+    assert_eq!(decoded, items);
+    assert_eq!(consumed, expected.len());
+}
+
+#[test]
+fn integer_vectors_use_little_endian_payloads() {
+    assert_integer_vector_wire_bytes(vec![0x12u8, 0x34], &[0x12, 0x34]);
+    assert_integer_vector_wire_bytes(vec![-2i8, 1], &[0xfe, 1]);
+    assert_integer_vector_wire_bytes(vec![0x1234u16, 0xabcd], &[0x34, 0x12, 0xcd, 0xab]);
+    assert_integer_vector_wire_bytes(vec![-2i16, 1], &[0xfe, 0xff, 1, 0]);
+    assert_integer_vector_wire_bytes(vec![0x12345678u32], &[0x78, 0x56, 0x34, 0x12]);
+    assert_integer_vector_wire_bytes(vec![-2i32], &[0xfe, 0xff, 0xff, 0xff]);
+    assert_integer_vector_wire_bytes(vec![0x0102030405060708u64], &[8, 7, 6, 5, 4, 3, 2, 1]);
+    assert_integer_vector_wire_bytes(
+        vec![-2i64],
+        &[0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+    );
+    assert_integer_vector_wire_bytes(
+        vec![0x0102030405060708090a0b0c0d0e0f10u128],
+        &[16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+    );
+    assert_integer_vector_wire_bytes(
+        vec![-2i128],
+        &[
+            0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff,
+        ],
+    );
+}
+
 #[test]
 fn unit_vectors_use_only_the_count() {
     for count in [0u32, 1, 7, u32::MAX] {
