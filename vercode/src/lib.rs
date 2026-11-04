@@ -453,8 +453,9 @@ pub trait VerCodable: Sized {
         }
     }
 
+    /// Calculates the encoded size of an optional value without taking ownership.
     #[inline(always)]
-    fn size_option_version(this: &Option<Self>, version: u32) -> Result<usize, InvalidEncoding> {
+    fn size_option_version(this: Option<&Self>, version: u32) -> Result<usize, InvalidEncoding> {
         match this {
             Some(inner) => inner
                 .size_version(version)?
@@ -553,7 +554,7 @@ impl VerCodable for bool {
     }
 
     #[inline(always)]
-    fn size_option_version(_this: &Option<Self>, _version: u32) -> Result<usize, InvalidEncoding> {
+    fn size_option_version(_this: Option<&Self>, _version: u32) -> Result<usize, InvalidEncoding> {
         Ok(1)
     }
 }
@@ -656,7 +657,7 @@ macro_rules! impl_vercodable_bytes_nonzero_try_as {
 
             #[inline(always)]
             fn size_option_version(
-                _this: &Option<Self>,
+                _this: Option<&Self>,
                 _version: u32,
             ) -> Result<usize, InvalidEncoding> {
                 Ok(std::mem::size_of::<$t>())
@@ -795,7 +796,7 @@ impl<T: VerCodable> VerCodable for Option<T> {
 
     #[inline(always)]
     fn size_version(&self, version: u32) -> Result<usize, InvalidEncoding> {
-        T::size_option_version(self, version)
+        T::size_option_version(self.as_ref(), version)
     }
 }
 
@@ -853,10 +854,11 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<i128>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<()>();
 
-        if special_case {
+        if special_case && (cfg!(target_endian = "little") || std::mem::size_of::<T>() <= 1) {
             let value = self.as_slice();
             let byte_len = std::mem::size_of_val(value);
-            // SAFETY: these types have same representation as their raw memory layout
+            // SAFETY: integer memory matches the wire byte order on this path.
+            // Unit values have no payload bytes.
             let bytes =
                 unsafe { std::slice::from_raw_parts(value.as_ptr() as *const u8, byte_len) };
             buf[offset..offset + byte_len].copy_from_slice(bytes);
@@ -895,29 +897,35 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
                 .checked_mul(std::mem::size_of::<T>())
                 .ok_or(InvalidEncoding)?;
             let total = end_index(offset, byte_len, buf.len())?;
-            let mut result: Vec<T> = Vec::with_capacity(len);
-            // SAFETY: integers accept all bit patterns; () needs no initialized bytes.
-            // The checked byte count fits the input and the vector's capacity.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    buf[offset..].as_ptr(),
-                    result.as_mut_ptr() as *mut u8,
-                    byte_len,
-                );
-                result.set_len(len);
+            if cfg!(target_endian = "little") || std::mem::size_of::<T>() <= 1 {
+                let mut result: Vec<T> = Vec::with_capacity(len);
+                // SAFETY: integers accept all bit patterns and match the wire byte order.
+                // Unit values need no initialized bytes. The checked payload fits both buffers.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        buf[offset..].as_ptr(),
+                        result.as_mut_ptr() as *mut u8,
+                        byte_len,
+                    );
+                    result.set_len(len);
+                }
+                return Ok((result, total));
             }
-            Ok((result, total))
-        } else {
-            let capacity = initial_capacity::<T>(len);
-            let mut result = Vec::with_capacity(capacity);
-            for _ in 0..len {
-                let input = buf.get(offset..).ok_or(InvalidEncoding)?;
-                let (item, read_bytes) = T::read_version(version, input)?;
-                result.push(item);
-                offset = end_index(offset, read_bytes, buf.len())?;
-            }
-            Ok((result, offset))
         }
+
+        let capacity = if special_case {
+            len
+        } else {
+            initial_capacity::<T>(len)
+        };
+        let mut result = Vec::with_capacity(capacity);
+        for _ in 0..len {
+            let input = buf.get(offset..).ok_or(InvalidEncoding)?;
+            let (item, read_bytes) = T::read_version(version, input)?;
+            result.push(item);
+            offset = end_index(offset, read_bytes, buf.len())?;
+        }
+        Ok((result, offset))
     }
 
     fn size_version(&self, version: u32) -> Result<usize, InvalidEncoding> {

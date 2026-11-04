@@ -33,11 +33,12 @@ Custom `VerCodable` implementations must return `Result<usize, InvalidEncoding>`
 from `write_version` and `size_version`. Overrides of `write_option` and
 `size_option_version` use the same return type. Callers can propagate errors
 with `?` or handle them explicitly.
+Overrides of `size_option_version` now receive `Option<&Self>` instead of `&Option<Self>`.
 
 Lengths that exceed the wire format limits return `Err(InvalidEncoding)`
 instead of silently truncating. Size calculations also reject arithmetic overflow.
 `serialize_to_vec` checks the encoded size before it allocates its output buffer.
-Valid values retain the same wire format.
+Valid values retain the same documented wire format.
 
 Buffer-based serializers still require sufficient output space and can panic
 if the buffer is too small. An error can leave the output buffer partially written.
@@ -51,8 +52,15 @@ Hash-table overhead and allocator rounding can increase the actual allocation.
 This limit applies only to the initial reservation, not subsequent growth or total decoded memory.
 
 Integer vectors allocate only after the decoder checks that the full payload fits in the input.
+Integer vectors use little-endian payloads on every target.
+Little-endian targets use bulk copies.
+Big-endian targets convert multi-byte integers through their per-element codecs.
 `Vec<()>` reads and writes only its count, without a loop over its elements.
-These changes preserve the wire format.
+These changes preserve the documented wire format.
+
+On big-endian targets, earlier versions wrote multi-byte integer vectors in native byte order.
+Decode those payloads with the old version.
+Then re-encode the values with this version.
 
 ## Example: Evolving a Protocol
 
