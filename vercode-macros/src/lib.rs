@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Meta, parse_macro_input};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 mod integer_enum;
 
@@ -47,55 +47,58 @@ struct VersionBatch<'a> {
     fields: Vec<FieldInfo<'a>>,
 }
 
-fn parse_version_attribute(attrs: &[syn::Attribute]) -> u32 {
+fn parse_version_attribute(attrs: &[syn::Attribute]) -> syn::Result<u32> {
+    let mut version = None;
     for attr in attrs {
-        if let Meta::List(list) = &attr.meta
-            && list.path.is_ident("version")
-        {
-            let ts = list.tokens.to_string();
-            let digits: String = ts.chars().filter(|c| c.is_ascii_digit()).collect();
-            if let Ok(v) = digits.parse::<u32>() {
-                return v;
+        if attr.path().is_ident("version") {
+            if version.is_some() {
+                return Err(syn::Error::new_spanned(attr, "duplicate version attribute"));
             }
+            let literal = attr.parse_args::<syn::LitInt>()?;
+            version = Some(literal.base10_parse::<u32>()?);
         }
     }
-    0
+    Ok(version.unwrap_or(0))
 }
 
-fn field_version(field: &syn::Field) -> u32 {
+fn field_version(field: &syn::Field) -> syn::Result<u32> {
     parse_version_attribute(&field.attrs)
 }
 
-fn variant_version(variant: &syn::Variant) -> u32 {
+fn variant_version(variant: &syn::Variant) -> syn::Result<u32> {
     parse_version_attribute(&variant.attrs)
 }
 
 /// Extract and organize field information from Fields
-fn extract_field_info(fields: &Fields) -> Vec<FieldInfo<'_>> {
+fn extract_field_info(fields: &Fields) -> syn::Result<Vec<FieldInfo<'_>>> {
     match fields {
         Fields::Named(named) => named
             .named
             .iter()
             .enumerate()
-            .map(|(i, f)| FieldInfo {
-                index: i,
-                version: field_version(f),
-                ty: &f.ty,
-                ident: f.ident.as_ref(),
+            .map(|(i, f)| {
+                Ok(FieldInfo {
+                    index: i,
+                    version: field_version(f)?,
+                    ty: &f.ty,
+                    ident: f.ident.as_ref(),
+                })
             })
             .collect(),
         Fields::Unnamed(unnamed) => unnamed
             .unnamed
             .iter()
             .enumerate()
-            .map(|(i, f)| FieldInfo {
-                index: i,
-                version: field_version(f),
-                ty: &f.ty,
-                ident: None,
+            .map(|(i, f)| {
+                Ok(FieldInfo {
+                    index: i,
+                    version: field_version(f)?,
+                    ty: &f.ty,
+                    ident: None,
+                })
             })
             .collect(),
-        Fields::Unit => vec![],
+        Fields::Unit => Ok(vec![]),
     }
 }
 
@@ -308,6 +311,7 @@ fn calculate_max_version_expr(field_infos: &[FieldInfo]) -> proc_macro2::TokenSt
 /// Variant information for enum processing
 struct VariantInfo<'a> {
     index: u16,
+    version: u32,
     variant: &'a syn::Variant,
     field_infos: Vec<FieldInfo<'a>>,
     batches: Vec<VersionBatch<'a>>,
@@ -321,10 +325,12 @@ impl<'a> VariantInfo<'a> {
                 "Vercode supports at most 65536 enum variants",
             )
         })?;
-        let field_infos = extract_field_info(&variant.fields);
+        let version = variant_version(variant)?;
+        let field_infos = extract_field_info(&variant.fields)?;
         let batches = create_version_batches(field_infos.clone());
         Ok(VariantInfo {
             index,
+            version,
             variant,
             field_infos,
             batches,
@@ -332,7 +338,7 @@ impl<'a> VariantInfo<'a> {
     }
 
     fn max_version_expr(&self) -> proc_macro2::TokenStream {
-        let variant_ver = variant_version(self.variant);
+        let variant_ver = self.version;
 
         // Get field attribute versions
         let field_attr_max = self
@@ -628,7 +634,7 @@ fn derive_struct(
     where_clause: &Option<&syn::WhereClause>,
     fields: &Fields,
 ) -> syn::Result<proc_macro2::TokenStream> {
-    let field_infos = extract_field_info(fields);
+    let field_infos = extract_field_info(fields)?;
     let batches = create_version_batches(field_infos.clone());
 
     let max_version_expr = calculate_max_version_expr(&field_infos);
@@ -783,8 +789,77 @@ fn derive_enum(
 mod tests {
     use super::{
         FieldInfo, VariantInfo, VersionBatch, expand_vercode, expand_vercode_transparent,
-        generate_field_sizes, generate_field_writes,
+        generate_field_sizes, generate_field_writes, parse_version_attribute,
     };
+
+    #[test]
+    fn version_attributes_parse_integer_values() {
+        for (attribute, expected) in [
+            (syn::parse_quote!(#[version(0)]), 0),
+            (syn::parse_quote!(#[version(4294967295)]), u32::MAX),
+            (syn::parse_quote!(#[version(1u32)]), 1),
+            (syn::parse_quote!(#[version(1_000)]), 1000),
+            (syn::parse_quote!(#[version(0x10)]), 16),
+            (syn::parse_quote!(#[version(0o10)]), 8),
+            (syn::parse_quote!(#[version(0b10)]), 2),
+        ] {
+            assert_eq!(parse_version_attribute(&[attribute]).unwrap(), expected);
+        }
+        assert_eq!(parse_version_attribute(&[]).unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_version_attributes_return_errors() {
+        for attribute in [
+            syn::parse_quote!(#[version(4294967296)]),
+            syn::parse_quote!(#[version(-1)]),
+            syn::parse_quote!(#[version(1 + 2)]),
+            syn::parse_quote!(#[version("future")]),
+            syn::parse_quote!(#[version()]),
+            syn::parse_quote!(#[version]),
+            syn::parse_quote!(#[version = 1]),
+        ] {
+            assert!(parse_version_attribute(&[attribute]).is_err());
+        }
+        let attributes = [
+            syn::parse_quote!(#[version(1)]),
+            syn::parse_quote!(#[version(2)]),
+        ];
+        assert_eq!(
+            parse_version_attribute(&attributes)
+                .unwrap_err()
+                .to_string(),
+            "duplicate version attribute"
+        );
+    }
+
+    #[test]
+    fn version_errors_propagate_from_fields_and_variants() {
+        for input in [
+            syn::parse_quote!(
+                struct Named {
+                    #[version(-1)]
+                    value: u8,
+                }
+            ),
+            syn::parse_quote!(
+                struct Tuple(#[version(1 + 2)] u8);
+            ),
+            syn::parse_quote!(
+                enum Event {
+                    #[version(4294967296)]
+                    Unit,
+                }
+            ),
+            syn::parse_quote!(
+                enum Event {
+                    Tuple(#[version(-1)] u8),
+                }
+            ),
+        ] {
+            assert!(expand_vercode(&input).is_err());
+        }
+    }
 
     #[test]
     fn invalid_transparent_structs_return_errors() {

@@ -197,6 +197,9 @@ Vercode uses a **length-prefixed binary format**:
 
 Fields are ordered by version number (v0, then v1, then v2, etc.), and then source order.
 
+Version attributes accept one integer literal that fits in `u32`, including hexadecimal literals and integer suffixes.
+Negative values, expressions, duplicate attributes, and out-of-range values produce compile errors.
+
 The struct or enum length includes its header. Derived readers reject lengths
 smaller than the header or larger than the available input. Field readers receive
 only the bytes within that frame. Malformed lengths and truncated fields return
