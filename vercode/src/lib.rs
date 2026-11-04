@@ -86,6 +86,7 @@ pub trait U16Enum: Copy + Default + TryFrom<u16> + Into<u16> {}
 ///
 /// This is the primary serialization function that should be used in production code.
 /// It serializes all fields up to the type's maximum version.
+/// Derived frames calculate their length from the bytes written, without a sizing preflight.
 ///
 /// # Errors
 ///
@@ -410,6 +411,7 @@ pub trait VerCodable: Sized {
     /// Returns [`InvalidEncoding`] if the output buffer is too small, a length is
     /// unrepresentable, or a nested writer returns an error.
     /// An error can leave the output buffer partially written.
+    /// Derived frames fill their length prefix only after their fields write successfully.
     /// Custom implementations must check output bounds before each write.
     /// On success, the returned byte count must not exceed the output buffer length.
     fn write_version(&self, version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding>;

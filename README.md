@@ -45,8 +45,13 @@ An error can leave the output buffer partially written.
 Custom writers must check output bounds and return this error instead of panicking.
 On success, their returned byte count must not exceed the output buffer length.
 
-`serialize` does not calculate the encoded size before it calls the writer.
-Derived structs and enums check buffer space with the size calculation that their length prefixes already require.
+`serialize` and `serialize_version` do not calculate the encoded size before they call the writer.
+Derived structs and enums check header space, write their fields, then fill the length prefix with the actual byte count.
+This avoids repeated subtree sizing in nested values.
+Writers check accumulated byte counts for arithmetic overflow and the `u32` frame-length limit.
+An error can occur after some fields write, and a failed frame can retain an unfinished length prefix.
+Buffer serialization propagates writer errors, not size-calculation errors.
+`serialize_to_vec` still calculates the size once before allocation.
 Primitive writers use checked slices, and string and integer-vector writers check payload bounds before the bulk write.
 
 ## Collection decoding

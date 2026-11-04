@@ -128,7 +128,7 @@ fn create_version_batches(mut field_infos: Vec<FieldInfo>) -> Vec<VersionBatch> 
 fn generate_field_writes(
     batches: &[VersionBatch],
     is_named: bool,
-) -> syn::Result<Vec<proc_macro2::TokenStream>> {
+) -> syn::Result<proc_macro2::TokenStream> {
     let mut writes = Vec::new();
     let mut last_version = 0u32;
 
@@ -136,21 +136,33 @@ fn generate_field_writes(
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            writes.push(quote! { if version < #v { return Ok(offset); } });
+            writes.push(quote! { if version < #v { break 'vercode_fields; } });
         }
 
         for field in &batch.fields {
             let write_stmt = if is_named {
                 let ident = field.ident.unwrap();
-                quote! { offset += ::vercode::VerCodable::write_version(&self.#ident, version, &mut buf[offset..])?; }
+                quote! {
+                    offset = offset.checked_add(::vercode::VerCodable::write_version(&self.#ident, version, &mut buf[offset..])?)
+                        .ok_or(::vercode::InvalidEncoding)?;
+                    ::core::primitive::u32::try_from(offset).map_err(|_| ::vercode::InvalidEncoding)?;
+                }
             } else {
                 let idx = tuple_field_index(field)?;
-                quote! { offset += ::vercode::VerCodable::write_version(&self.#idx, version, &mut buf[offset..])?; }
+                quote! {
+                    offset = offset.checked_add(::vercode::VerCodable::write_version(&self.#idx, version, &mut buf[offset..])?)
+                        .ok_or(::vercode::InvalidEncoding)?;
+                    ::core::primitive::u32::try_from(offset).map_err(|_| ::vercode::InvalidEncoding)?;
+                }
             };
             writes.push(write_stmt);
         }
     }
-    Ok(writes)
+    if last_version == 0 {
+        Ok(quote! { #(#writes)* })
+    } else {
+        Ok(quote! { 'vercode_fields: { #(#writes)* } })
+    }
 }
 
 fn tuple_field_index(field: &FieldInfo<'_>) -> syn::Result<syn::Index> {
@@ -426,7 +438,7 @@ impl<'a> VariantInfo<'a> {
             #pattern => {
                 buf[offset..offset+2].copy_from_slice(&#index.to_le_bytes());
                 offset += 2;
-                #(#field_writes)*
+                #field_writes
             }
         }
     }
@@ -459,7 +471,7 @@ impl<'a> VariantInfo<'a> {
 }
 
 /// Generate write statements for variant fields (using temp vars)
-fn generate_variant_field_writes(batches: &[VersionBatch]) -> Vec<proc_macro2::TokenStream> {
+fn generate_variant_field_writes(batches: &[VersionBatch]) -> proc_macro2::TokenStream {
     let mut writes = Vec::new();
     let mut last_version = 0u32;
 
@@ -467,17 +479,23 @@ fn generate_variant_field_writes(batches: &[VersionBatch]) -> Vec<proc_macro2::T
         if batch.version != last_version {
             last_version = batch.version;
             let v = batch.version;
-            writes.push(quote! { if version < #v { return Ok(offset); } });
+            writes.push(quote! { if version < #v { break 'vercode_fields; } });
         }
 
         for field in &batch.fields {
             let temp_var = field.temp_var();
             writes.push(quote! {
-                offset += ::vercode::VerCodable::write_version(#temp_var, version, &mut buf[offset..])?;
+                offset = offset.checked_add(::vercode::VerCodable::write_version(#temp_var, version, &mut buf[offset..])?)
+                    .ok_or(::vercode::InvalidEncoding)?;
+                ::core::primitive::u32::try_from(offset).map_err(|_| ::vercode::InvalidEncoding)?;
             });
         }
     }
-    writes
+    if last_version == 0 {
+        quote! { #(#writes)* }
+    } else {
+        quote! { 'vercode_fields: { #(#writes)* } }
+    }
 }
 
 /// Generate size statements for variant fields (using temp vars)
@@ -653,15 +671,14 @@ fn derive_struct(
 
             #[inline(always)]
             fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
-                let total_data = ::vercode::VerCodable::size_version(self, version)?;
-                let length = ::core::primitive::u32::try_from(total_data)
-                    .map_err(|_| ::vercode::InvalidEncoding)?;
-                if total_data > buf.len() {
+                if buf.len() < 4 {
                     return Err(::vercode::InvalidEncoding);
                 }
-                buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
-                #(#writes)*
+                #writes
+                let length = ::core::primitive::u32::try_from(offset)
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                buf[..4].copy_from_slice(&length.to_le_bytes());
                 Ok(offset)
             }
 
@@ -740,17 +757,16 @@ fn derive_enum(
 
             #[inline(always)]
             fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
-                let total_data = ::vercode::VerCodable::size_version(self, version)?;
-                let length = ::core::primitive::u32::try_from(total_data)
-                    .map_err(|_| ::vercode::InvalidEncoding)?;
-                if total_data > buf.len() {
+                if buf.len() < 6 {
                     return Err(::vercode::InvalidEncoding);
                 }
-                buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
                 match self {
                     #(#write_arms)*
                 }
+                let length = ::core::primitive::u32::try_from(offset)
+                    .map_err(|_| ::vercode::InvalidEncoding)?;
+                buf[..4].copy_from_slice(&length.to_le_bytes());
                 Ok(offset)
             }
 
