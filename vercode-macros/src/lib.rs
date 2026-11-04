@@ -553,9 +553,11 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
             }
 
             #[inline(always)]
-            fn size_option_version(this: &Option<Self>, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
-                let inner_option = this.as_ref().map(|this| this.#field_accessor);
-                <#inner_type as ::vercode::VerCodable>::size_option_version(&inner_option, version)
+            fn size_option_version(this: Option<&Self>, version: u32) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
+                <#inner_type as ::vercode::VerCodable>::size_option_version(
+                    this.map(|this| &this.#field_accessor),
+                    version,
+                )
             }
         }
     };

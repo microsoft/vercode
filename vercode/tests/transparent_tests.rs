@@ -92,3 +92,56 @@ fn size_of_newtype_should_be_same_as_inner() {
     assert_eq!(size_struct, size_newtype);
     assert_eq!(size_newtype, 4); // Just the u32
 }
+
+#[test]
+fn transparent_string_and_its_options_do_not_require_copy_or_clone() {
+    #[derive(Debug, PartialEq, VercodeTransparent)]
+    struct Label(String);
+
+    for label in [Label(String::new()), Label("hello".to_string())] {
+        let bytes = vercode::serialize_to_vec(&label).unwrap();
+        assert_eq!(bytes, vercode::serialize_to_vec(&label.0).unwrap());
+        assert_eq!(deserialize::<Label>(&bytes).unwrap(), label);
+
+        let value = Some(label);
+        let bytes = vercode::serialize_to_vec(&value).unwrap();
+        assert_eq!(deserialize::<Option<Label>>(&bytes).unwrap(), value);
+        assert_eq!(
+            deserialize::<Option<String>>(&bytes).unwrap().as_ref(),
+            value.as_ref().map(|label| &label.0)
+        );
+    }
+
+    assert_eq!(vercode::serialize_to_vec(&None::<Label>).unwrap(), [0]);
+    assert_eq!(deserialize::<Option<Label>>(&[0]).unwrap(), None);
+}
+
+#[test]
+fn transparent_named_vector_and_its_options_do_not_require_copy_or_clone() {
+    #[derive(Debug, PartialEq, VercodeTransparent)]
+    struct Payload {
+        values: Vec<u16>,
+    }
+
+    for payload in [
+        Payload { values: vec![] },
+        Payload {
+            values: vec![42, 43],
+        },
+    ] {
+        let bytes = vercode::serialize_to_vec(&payload).unwrap();
+        assert_eq!(bytes, vercode::serialize_to_vec(&payload.values).unwrap());
+        assert_eq!(deserialize::<Payload>(&bytes).unwrap(), payload);
+
+        let value = Some(payload);
+        let bytes = vercode::serialize_to_vec(&value).unwrap();
+        assert_eq!(deserialize::<Option<Payload>>(&bytes).unwrap(), value);
+        assert_eq!(
+            deserialize::<Option<Vec<u16>>>(&bytes).unwrap().as_ref(),
+            value.as_ref().map(|payload| &payload.values)
+        );
+    }
+
+    assert_eq!(vercode::serialize_to_vec(&None::<Payload>).unwrap(), [0]);
+    assert_eq!(deserialize::<Option<Payload>>(&[0]).unwrap(), None);
+}
