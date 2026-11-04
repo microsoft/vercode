@@ -453,8 +453,9 @@ pub trait VerCodable: Sized {
         }
     }
 
+    /// Calculates the encoded size of an optional value without taking ownership.
     #[inline(always)]
-    fn size_option_version(this: &Option<Self>, version: u32) -> Result<usize, InvalidEncoding> {
+    fn size_option_version(this: Option<&Self>, version: u32) -> Result<usize, InvalidEncoding> {
         match this {
             Some(inner) => inner
                 .size_version(version)?
@@ -553,7 +554,7 @@ impl VerCodable for bool {
     }
 
     #[inline(always)]
-    fn size_option_version(_this: &Option<Self>, _version: u32) -> Result<usize, InvalidEncoding> {
+    fn size_option_version(_this: Option<&Self>, _version: u32) -> Result<usize, InvalidEncoding> {
         Ok(1)
     }
 }
@@ -656,7 +657,7 @@ macro_rules! impl_vercodable_bytes_nonzero_try_as {
 
             #[inline(always)]
             fn size_option_version(
-                _this: &Option<Self>,
+                _this: Option<&Self>,
                 _version: u32,
             ) -> Result<usize, InvalidEncoding> {
                 Ok(std::mem::size_of::<$t>())
@@ -795,7 +796,7 @@ impl<T: VerCodable> VerCodable for Option<T> {
 
     #[inline(always)]
     fn size_version(&self, version: u32) -> Result<usize, InvalidEncoding> {
-        T::size_option_version(self, version)
+        T::size_option_version(self.as_ref(), version)
     }
 }
 

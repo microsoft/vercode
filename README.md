@@ -33,6 +33,7 @@ Custom `VerCodable` implementations must return `Result<usize, InvalidEncoding>`
 from `write_version` and `size_version`. Overrides of `write_option` and
 `size_option_version` use the same return type. Callers can propagate errors
 with `?` or handle them explicitly.
+Overrides of `size_option_version` now receive `Option<&Self>` instead of `&Option<Self>`.
 
 Lengths that exceed the wire format limits return `Err(InvalidEncoding)`
 instead of silently truncating. Size calculations also reject arithmetic overflow.
@@ -137,6 +138,8 @@ struct UserId(u64);
 
 // Serializes as just a u64, no wrapper overhead
 ```
+
+The inner type does not need to implement `Copy` or `Clone`.
 
 ## Integer enums with default fallback
 

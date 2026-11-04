@@ -463,8 +463,15 @@ fn test_option_struct_with_option_fields() {
 
 #[test]
 fn test_option_transparent() {
-    #[derive(VercodeTransparent)]
+    #[derive(Debug, PartialEq, Clone, VercodeTransparent)]
     struct Transparent(NonZeroU64);
 
     assert_eq!(8, vercode::size(&Transparent(NonZeroU64::MIN)).unwrap());
+    test_option_round_trip(Transparent(NonZeroU64::MIN), 8, 8);
+
+    #[derive(Debug, PartialEq, Clone, VercodeTransparent)]
+    struct TransparentBool(bool);
+
+    test_option_round_trip(TransparentBool(true), 1, 1);
+    test_option_round_trip(TransparentBool(false), 1, 1);
 }
