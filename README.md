@@ -138,6 +138,10 @@ struct UserId(u64);
 // Serializes as just a u64, no wrapper overhead
 ```
 
+`VercodeTransparent` requires a struct with exactly one field.
+`Vercode` supports structs and enums, but not unions.
+Unsupported derive targets produce compile errors that identify the type.
+
 ## Integer enums with default fallback
 
 For fieldless enums whose unknown wire codes should map to `Default::default()`,

@@ -125,7 +125,7 @@ fn create_version_batches(mut field_infos: Vec<FieldInfo>) -> Vec<VersionBatch> 
 fn generate_field_writes(
     batches: &[VersionBatch],
     is_named: bool,
-) -> Vec<proc_macro2::TokenStream> {
+) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut writes = Vec::new();
     let mut last_version = 0u32;
 
@@ -141,17 +141,30 @@ fn generate_field_writes(
                 let ident = field.ident.unwrap();
                 quote! { offset += ::vercode::VerCodable::write_version(&self.#ident, version, &mut buf[offset..])?; }
             } else {
-                let idx = syn::Index::from(field.index);
+                let idx = tuple_field_index(field)?;
                 quote! { offset += ::vercode::VerCodable::write_version(&self.#idx, version, &mut buf[offset..])?; }
             };
             writes.push(write_stmt);
         }
     }
-    writes
+    Ok(writes)
+}
+
+fn tuple_field_index(field: &FieldInfo<'_>) -> syn::Result<syn::Index> {
+    let index = u32::try_from(field.index).map_err(|_| {
+        syn::Error::new_spanned(field.ty, "Vercode tuple field index exceeds u32::MAX")
+    })?;
+    Ok(syn::Index {
+        index,
+        span: proc_macro2::Span::call_site(),
+    })
 }
 
 /// Generate size calculation code for a batch of fields
-fn generate_field_sizes(batches: &[VersionBatch], is_named: bool) -> Vec<proc_macro2::TokenStream> {
+fn generate_field_sizes(
+    batches: &[VersionBatch],
+    is_named: bool,
+) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut sizes = Vec::new();
     let mut last_version = 0u32;
 
@@ -171,7 +184,7 @@ fn generate_field_sizes(batches: &[VersionBatch], is_named: bool) -> Vec<proc_ma
                     ::core::primitive::u32::try_from(total).map_err(|_| ::vercode::InvalidEncoding)?;
                 }
             } else {
-                let idx = syn::Index::from(field.index);
+                let idx = tuple_field_index(field)?;
                 quote! {
                     total = total.checked_add(::vercode::VerCodable::size_version(&self.#idx, version)?)
                         .ok_or(::vercode::InvalidEncoding)?;
@@ -181,7 +194,7 @@ fn generate_field_sizes(batches: &[VersionBatch], is_named: bool) -> Vec<proc_ma
             sizes.push(size_stmt);
         }
     }
-    sizes
+    Ok(sizes)
 }
 
 /// Generate read code for version batches
@@ -488,6 +501,12 @@ fn generate_variant_field_sizes(batches: &[VersionBatch]) -> Vec<proc_macro2::To
 #[proc_macro_derive(VercodeTransparent)]
 pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    expand_vercode_transparent(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn expand_vercode_transparent(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -509,11 +528,19 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
                     quote! { Self { #field_name: inner } },
                 )
             }
-            _ => panic!(
-                "VercodeTransparent can only be used on newtype structs with exactly one field"
-            ),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &input.ident,
+                    "VercodeTransparent requires a struct with exactly one field",
+                ));
+            }
         },
-        _ => panic!("VercodeTransparent can only be used on structs"),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input.ident,
+                "VercodeTransparent only supports structs",
+            ));
+        }
     };
 
     let expanded = quote! {
@@ -560,12 +587,18 @@ pub fn derive_vercode_transparent(input: TokenStream) -> TokenStream {
         }
     };
 
-    TokenStream::from(expanded)
+    Ok(expanded)
 }
 
 #[proc_macro_derive(Vercode, attributes(version))]
 pub fn derive_vercode(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    expand_vercode(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn expand_vercode(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -581,7 +614,10 @@ pub fn derive_vercode(input: TokenStream) -> TokenStream {
             &where_clause,
             &e.variants,
         ),
-        _ => panic!("Vercode only supports structs and enums"),
+        _ => Err(syn::Error::new_spanned(
+            &input.ident,
+            "Vercode only supports structs and enums",
+        )),
     }
 }
 
@@ -591,15 +627,15 @@ fn derive_struct(
     ty_generics: &syn::TypeGenerics,
     where_clause: &Option<&syn::WhereClause>,
     fields: &Fields,
-) -> TokenStream {
+) -> syn::Result<proc_macro2::TokenStream> {
     let field_infos = extract_field_info(fields);
     let batches = create_version_batches(field_infos.clone());
 
     let max_version_expr = calculate_max_version_expr(&field_infos);
 
     let is_named = matches!(fields, Fields::Named(_));
-    let writes = generate_field_writes(&batches, is_named);
-    let sizes = generate_field_sizes(&batches, is_named);
+    let writes = generate_field_writes(&batches, is_named)?;
+    let sizes = generate_field_sizes(&batches, is_named)?;
     let reads = generate_field_reads(&batches);
     let construction = generate_struct_construction(name, fields, &field_infos);
 
@@ -642,7 +678,7 @@ fn derive_struct(
             }
         }
     };
-    TokenStream::from(expanded)
+    Ok(expanded)
 }
 
 fn derive_enum(
@@ -651,17 +687,13 @@ fn derive_enum(
     ty_generics: &syn::TypeGenerics,
     where_clause: &Option<&syn::WhereClause>,
     variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>,
-) -> TokenStream {
+) -> syn::Result<proc_macro2::TokenStream> {
     // Process all variants once
     let variant_infos = variants
         .iter()
         .enumerate()
         .map(|(idx, variant)| VariantInfo::new(idx, variant))
-        .collect::<syn::Result<Vec<VariantInfo>>>();
-    let variant_infos = match variant_infos {
-        Ok(infos) => infos,
-        Err(error) => return error.into_compile_error().into(),
-    };
+        .collect::<syn::Result<Vec<VariantInfo>>>()?;
 
     // Calculate max version expression
     // Generate const expression that computes max across all variants
@@ -744,12 +776,109 @@ fn derive_enum(
         }
     };
 
-    TokenStream::from(expanded)
+    Ok(expanded)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::VariantInfo;
+    use super::{
+        FieldInfo, VariantInfo, VersionBatch, expand_vercode, expand_vercode_transparent,
+        generate_field_sizes, generate_field_writes,
+    };
+
+    #[test]
+    fn invalid_transparent_structs_return_errors() {
+        for input in [
+            syn::parse_quote!(
+                struct Unit;
+            ),
+            syn::parse_quote!(
+                struct EmptyTuple();
+            ),
+            syn::parse_quote!(
+                struct EmptyNamed {}
+            ),
+            syn::parse_quote!(
+                struct Tuple(u8, u8);
+            ),
+            syn::parse_quote!(
+                struct Named {
+                    first: u8,
+                    second: u8,
+                }
+            ),
+        ] {
+            let error = expand_vercode_transparent(&input).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "VercodeTransparent requires a struct with exactly one field"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_derive_targets_return_errors() {
+        let union = syn::parse_quote!(union Unsupported { value: u8 });
+        assert_eq!(
+            expand_vercode(&union).unwrap_err().to_string(),
+            "Vercode only supports structs and enums"
+        );
+        for input in [
+            syn::parse_quote!(
+                enum Unsupported {
+                    Unit,
+                }
+            ),
+            union,
+        ] {
+            assert_eq!(
+                expand_vercode_transparent(&input).unwrap_err().to_string(),
+                "VercodeTransparent only supports structs"
+            );
+        }
+    }
+
+    #[test]
+    fn tuple_field_indices_preserve_the_u32_boundary() {
+        let ty = syn::parse_quote!(u8);
+        for index in [0, u32::MAX as usize] {
+            let batches = [VersionBatch {
+                version: 0,
+                fields: vec![FieldInfo {
+                    index,
+                    version: 0,
+                    ty: &ty,
+                    ident: None,
+                }],
+            }];
+            assert!(generate_field_writes(&batches, false).is_ok());
+            assert!(generate_field_sizes(&batches, false).is_ok());
+        }
+        #[cfg(target_pointer_width = "64")]
+        for index in [u32::MAX as usize + 1, usize::MAX] {
+            let batches = [VersionBatch {
+                version: 0,
+                fields: vec![FieldInfo {
+                    index,
+                    version: 0,
+                    ty: &ty,
+                    ident: None,
+                }],
+            }];
+            assert_eq!(
+                generate_field_writes(&batches, false)
+                    .unwrap_err()
+                    .to_string(),
+                "Vercode tuple field index exceeds u32::MAX"
+            );
+            assert_eq!(
+                generate_field_sizes(&batches, false)
+                    .unwrap_err()
+                    .to_string(),
+                "Vercode tuple field index exceeds u32::MAX"
+            );
+        }
+    }
 
     #[test]
     fn enum_indices_preserve_the_u16_boundary() {
