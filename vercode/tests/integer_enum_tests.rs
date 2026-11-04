@@ -70,6 +70,22 @@ macro_rules! integer_enum_tests {
             }
 
             #[test]
+            fn short_output_returns_an_error() {
+                let mode = NewMode::Turbo;
+                let mut buf = [0u8; 2];
+                for length in 0..std::mem::size_of::<$int>() {
+                    assert_eq!(
+                        mode.write_version(0, &mut buf[..length]),
+                        Err(InvalidEncoding)
+                    );
+                    assert_eq!(
+                        vercode::serialize(&mode, &mut buf[..length]),
+                        Err(InvalidEncoding)
+                    );
+                }
+            }
+
+            #[test]
             fn new_variant_defaults_without_corrupting_parent() {
                 for (mode, expected) in [
                     (NewMode::Normal, OldMode::Normal),

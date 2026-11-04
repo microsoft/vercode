@@ -86,15 +86,13 @@ pub trait U16Enum: Copy + Default + TryFrom<u16> + Into<u16> {}
 ///
 /// This is the primary serialization function that should be used in production code.
 /// It serializes all fields up to the type's maximum version.
+/// Derived frames calculate their length from the bytes written, without a sizing preflight.
 ///
 /// # Errors
 ///
-/// Returns [`InvalidEncoding`] if a length exceeds the wire format limits
-/// or a nested writer returns an error. An error can leave `buf` partially written.
-///
-/// # Panics
-///
-/// The output buffer must have sufficient space. A smaller buffer can cause a panic.
+/// Returns [`InvalidEncoding`] if the output buffer is too small, a length exceeds
+/// the wire format limits, or a nested writer returns an error.
+/// An error can leave `buf` partially written.
 ///
 /// # Examples
 ///
@@ -257,7 +255,7 @@ pub fn size<T: VerCodable>(value: &T) -> Result<usize, InvalidEncoding> {
 /// However, it can be useful for testing version compatibility since it lets you
 /// create an old data format without having to duplicate struct definitions.
 ///
-/// Errors and output buffer requirements are the same as for [`serialize`].
+/// Errors are the same as for [`serialize`], including an output buffer that is too small.
 ///
 /// # Examples
 ///
@@ -410,8 +408,12 @@ pub trait VerCodable: Sized {
 
     /// Writes fields at the specified version (does not write fields
     /// with a greater version).
-    /// Returns [`InvalidEncoding`] for unrepresentable lengths or nested writer errors.
-    /// The caller must supply sufficient output space.
+    /// Returns [`InvalidEncoding`] if the output buffer is too small, a length is
+    /// unrepresentable, or a nested writer returns an error.
+    /// An error can leave the output buffer partially written.
+    /// Derived frames fill their length prefix only after their fields write successfully.
+    /// Custom implementations must check output bounds before each write.
+    /// On success, the returned byte count must not exceed the output buffer length.
     fn write_version(&self, version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding>;
 
     /// Reads fields up to a specified version (does not read fields
@@ -426,12 +428,12 @@ pub trait VerCodable: Sized {
     ) -> Result<usize, InvalidEncoding> {
         match this {
             Some(inner) => {
-                buf[0] = 1;
+                *buf.first_mut().ok_or(InvalidEncoding)? = 1;
                 let size = inner.write_version(version, &mut buf[1..])?;
                 size.checked_add(1).ok_or(InvalidEncoding)
             }
             None => {
-                buf[0] = 0;
+                *buf.first_mut().ok_or(InvalidEncoding)? = 0;
                 Ok(1)
             }
         }
@@ -510,7 +512,7 @@ impl VerCodable for bool {
 
     #[inline(always)]
     fn write_version(&self, _version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding> {
-        buf[0] = if *self { 1 } else { 0 };
+        *buf.first_mut().ok_or(InvalidEncoding)? = if *self { 1 } else { 0 };
         Ok(1)
     }
 
@@ -534,10 +536,11 @@ impl VerCodable for bool {
         _version: u32,
         buf: &mut [u8],
     ) -> Result<usize, InvalidEncoding> {
+        let byte = buf.first_mut().ok_or(InvalidEncoding)?;
         match this {
-            Some(false) => buf[0] = 0,
-            Some(true) => buf[0] = 1,
-            None => buf[0] = 2,
+            Some(false) => *byte = 0,
+            Some(true) => *byte = 1,
+            None => *byte = 2,
         }
         Ok(1)
     }
@@ -573,7 +576,9 @@ macro_rules! impl_vercodable_bytes_try_as {
                 let value: $encoded = (*self).into();
                 let bytes = value.to_le_bytes();
                 let len = std::mem::size_of::<$encoded>();
-                buf[..len].copy_from_slice(&bytes);
+                buf.get_mut(..len)
+                    .ok_or(InvalidEncoding)?
+                    .copy_from_slice(&bytes);
                 Ok(len)
             }
 
@@ -607,7 +612,9 @@ macro_rules! impl_vercodable_bytes_nonzero_try_as {
                 let value: $encoded = (*self).into();
                 let bytes = value.to_le_bytes();
                 let len = std::mem::size_of::<$encoded>();
-                buf[..len].copy_from_slice(&bytes);
+                buf.get_mut(..len)
+                    .ok_or(InvalidEncoding)?
+                    .copy_from_slice(&bytes);
                 Ok(len)
             }
 
@@ -633,7 +640,9 @@ macro_rules! impl_vercodable_bytes_nonzero_try_as {
                 let value: $encoded = this.map(|v| (*v).into()).unwrap_or(0);
                 let bytes = value.to_le_bytes();
                 let len = std::mem::size_of::<$encoded>();
-                buf[..len].copy_from_slice(&bytes);
+                buf.get_mut(..len)
+                    .ok_or(InvalidEncoding)?
+                    .copy_from_slice(&bytes);
                 Ok(len)
             }
 
@@ -701,7 +710,9 @@ impl VerCodable for Uuid {
     fn write_version(&self, _version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding> {
         let bytes = self.as_bytes();
         let len = bytes.len();
-        buf[..len].copy_from_slice(bytes);
+        buf.get_mut(..len)
+            .ok_or(InvalidEncoding)?
+            .copy_from_slice(bytes);
         Ok(len)
     }
 
@@ -808,6 +819,9 @@ impl VerCodable for String {
         let bytes = self.as_bytes();
         let len = encoded_length(bytes.len())?;
         let end = bytes.len().checked_add(4).ok_or(InvalidEncoding)?;
+        if end > buf.len() {
+            return Err(InvalidEncoding);
+        }
         buf[0..4].copy_from_slice(&len.to_le_bytes());
         buf[4..end].copy_from_slice(bytes);
         Ok(end)
@@ -835,11 +849,13 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
     const MAX_VERSION: u32 = T::MAX_VERSION;
 
     fn write_version(&self, version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding> {
-        let mut offset = 0;
+        let mut offset = 0usize;
 
         // Write length as u32
         let len = encoded_length(self.len())?;
-        buf[offset..offset + 4].copy_from_slice(&len.to_le_bytes());
+        buf.get_mut(..4)
+            .ok_or(InvalidEncoding)?
+            .copy_from_slice(&len.to_le_bytes());
         offset += 4;
 
         let special_case = std::any::TypeId::of::<T>() == std::any::TypeId::of::<u8>()
@@ -861,8 +877,11 @@ impl<T: VerCodable + 'static> VerCodable for Vec<T> {
             // Unit values have no payload bytes.
             let bytes =
                 unsafe { std::slice::from_raw_parts(value.as_ptr() as *const u8, byte_len) };
-            buf[offset..offset + byte_len].copy_from_slice(bytes);
-            offset += byte_len;
+            let end = offset.checked_add(byte_len).ok_or(InvalidEncoding)?;
+            buf.get_mut(offset..end)
+                .ok_or(InvalidEncoding)?
+                .copy_from_slice(bytes);
+            offset = end;
         } else {
             // Write each element
             for item in self.iter() {
@@ -977,7 +996,9 @@ where
 
         // Write length as u32
         let len = encoded_length(self.len())?;
-        buf[offset..offset + 4].copy_from_slice(&len.to_le_bytes());
+        buf.get_mut(..4)
+            .ok_or(InvalidEncoding)?
+            .copy_from_slice(&len.to_le_bytes());
         offset += 4;
 
         // Write each key-value pair
@@ -1039,7 +1060,9 @@ where
 
         // Write length as u32
         let len = encoded_length(self.len())?;
-        buf[offset..offset + 4].copy_from_slice(&len.to_le_bytes());
+        buf.get_mut(..4)
+            .ok_or(InvalidEncoding)?
+            .copy_from_slice(&len.to_le_bytes());
         offset += 4;
 
         // Write each element
@@ -1100,7 +1123,9 @@ where
 
         // Write length as u32
         let len = encoded_length(self.len())?;
-        buf[offset..offset + 4].copy_from_slice(&len.to_le_bytes());
+        buf.get_mut(..4)
+            .ok_or(InvalidEncoding)?
+            .copy_from_slice(&len.to_le_bytes());
         offset += 4;
 
         // Write each key-value pair
@@ -1232,6 +1257,7 @@ impl VerCodable for std::net::SocketAddr {
     fn write_version(&self, _version: u32, buf: &mut [u8]) -> Result<usize, InvalidEncoding> {
         match self {
             std::net::SocketAddr::V4(socket_addr_v4) => {
+                let buf = buf.get_mut(..7).ok_or(InvalidEncoding)?;
                 buf[0] = 4;
                 let ip = socket_addr_v4.ip().to_bits();
                 buf[1..5].copy_from_slice(&ip.to_le_bytes());
@@ -1239,6 +1265,7 @@ impl VerCodable for std::net::SocketAddr {
                 Ok(7)
             }
             std::net::SocketAddr::V6(socket_addr_v6) => {
+                let buf = buf.get_mut(..27).ok_or(InvalidEncoding)?;
                 buf[0] = 6;
                 let ip = socket_addr_v6.ip().to_bits();
                 buf[1..17].copy_from_slice(&ip.to_le_bytes());
