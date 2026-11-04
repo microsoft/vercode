@@ -146,7 +146,9 @@ struct UserId(u64);
 // Serializes as just a u64, no wrapper overhead
 ```
 
-The inner type does not need to implement `Copy` or `Clone`.
+`VercodeTransparent` requires a struct with exactly one field.
+`Vercode` supports structs and enums, but not unions.
+Unsupported derive targets produce compile errors that identify the type.
 
 ## Integer enums with default fallback
 
@@ -202,6 +204,9 @@ Vercode uses a **length-prefixed binary format**:
 3. **Primitives**: Direct byte representation (little-endian)
 
 Fields are ordered by version number (v0, then v1, then v2, etc.), and then source order.
+
+Version attributes accept one integer literal that fits in `u32`, including hexadecimal literals and integer suffixes.
+Negative values, expressions, duplicate attributes, and out-of-range values produce compile errors.
 
 The struct or enum length includes its header. Derived readers reject lengths
 smaller than the header or larger than the available input. Field readers receive
