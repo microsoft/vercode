@@ -388,3 +388,51 @@ fn derived_writers_check_buffer_space_for_each_version() {
     );
     assert_eq!(buf, [0xa5; 4]);
 }
+
+#[test]
+fn derived_writers_ignore_inherent_size_version_methods() {
+    #[derive(Vercode)]
+    struct Versioned {
+        value: u8,
+        #[version(1)]
+        extra: u16,
+    }
+
+    impl Versioned {
+        fn size_version(&self, _: u32) -> Result<usize, InvalidEncoding> {
+            Ok(0)
+        }
+    }
+
+    #[derive(Vercode)]
+    enum Event {
+        Unit,
+        Tuple(u8, #[version(1)] u16),
+    }
+
+    impl Event {
+        fn size_version(&self, _: u32) -> Result<usize, InvalidEncoding> {
+            Ok(4)
+        }
+    }
+
+    let value = Versioned {
+        value: 42,
+        extra: 0x1234,
+    };
+    assert_eq!(value.size_version(0), Ok(0));
+    assert_buffer_bounds(&value);
+    assert_eq!(
+        serialize_to_vec(&value).unwrap(),
+        [7, 0, 0, 0, 42, 0x34, 0x12]
+    );
+
+    let event = Event::Tuple(42, 0x1234);
+    assert_eq!(event.size_version(0), Ok(4));
+    assert_buffer_bounds(&Event::Unit);
+    assert_buffer_bounds(&event);
+    assert_eq!(
+        serialize_to_vec(&event).unwrap(),
+        [9, 0, 0, 0, 1, 0, 42, 0x34, 0x12]
+    );
+}

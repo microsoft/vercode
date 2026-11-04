@@ -653,7 +653,7 @@ fn derive_struct(
 
             #[inline(always)]
             fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
-                let total_data = self.size_version(version)?;
+                let total_data = ::vercode::VerCodable::size_version(self, version)?;
                 let length = ::core::primitive::u32::try_from(total_data)
                     .map_err(|_| ::vercode::InvalidEncoding)?;
                 if total_data > buf.len() {
@@ -740,7 +740,7 @@ fn derive_enum(
 
             #[inline(always)]
             fn write_version(&self, version: u32, buf: &mut [u8]) -> ::core::result::Result<usize, ::vercode::InvalidEncoding> {
-                let total_data = self.size_version(version)?;
+                let total_data = ::vercode::VerCodable::size_version(self, version)?;
                 let length = ::core::primitive::u32::try_from(total_data)
                     .map_err(|_| ::vercode::InvalidEncoding)?;
                 if total_data > buf.len() {
