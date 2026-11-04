@@ -40,8 +40,14 @@ instead of silently truncating. Size calculations also reject arithmetic overflo
 `serialize_to_vec` checks the encoded size before it allocates its output buffer.
 Valid values retain the same documented wire format.
 
-Buffer-based serializers still require sufficient output space and can panic
-if the buffer is too small. An error can leave the output buffer partially written.
+Buffer-based serializers return `Err(InvalidEncoding)` if the output buffer is too small.
+An error can leave the output buffer partially written.
+Custom writers must check output bounds and return this error instead of panicking.
+On success, their returned byte count must not exceed the output buffer length.
+
+`serialize` does not calculate the encoded size before it calls the writer.
+Derived structs and enums check buffer space with the size calculation that their length prefixes already require.
+Primitive writers use checked slices, and string and integer-vector writers check payload bounds before the bulk write.
 
 ## Collection decoding
 

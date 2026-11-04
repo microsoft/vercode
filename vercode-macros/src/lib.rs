@@ -656,6 +656,9 @@ fn derive_struct(
                 let total_data = self.size_version(version)?;
                 let length = ::core::primitive::u32::try_from(total_data)
                     .map_err(|_| ::vercode::InvalidEncoding)?;
+                if total_data > buf.len() {
+                    return Err(::vercode::InvalidEncoding);
+                }
                 buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
                 #(#writes)*
@@ -740,6 +743,9 @@ fn derive_enum(
                 let total_data = self.size_version(version)?;
                 let length = ::core::primitive::u32::try_from(total_data)
                     .map_err(|_| ::vercode::InvalidEncoding)?;
+                if total_data > buf.len() {
+                    return Err(::vercode::InvalidEncoding);
+                }
                 buf[..4].copy_from_slice(&length.to_le_bytes());
                 let mut offset = 4usize;
                 match self {

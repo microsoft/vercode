@@ -1,5 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::num::{
+    NonZeroI64, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize,
+};
 use vercode::{
     InvalidEncoding, VerCodable, Vercode, VercodeTransparent, serialize, serialize_to_vec,
     serialize_version, size, size_version,
@@ -207,4 +210,181 @@ fn nested_size_errors_propagate() {
 #[test]
 fn nested_write_errors_propagate() {
     check_error_propagation::<false>();
+}
+
+fn assert_buffer_bounds<T: VerCodable>(value: &T) {
+    for version in [0, T::MAX_VERSION] {
+        let size = size_version(value, version).unwrap();
+        let mut exact = vec![0u8; size];
+        let expected = serialize_version(value, version, &mut exact)
+            .unwrap()
+            .to_vec();
+        let mut buf = vec![0xa5; size + 1];
+
+        for length in 0..size {
+            assert_eq!(
+                value.write_version(version, &mut buf[..length]),
+                Err(InvalidEncoding),
+                "version {version}, buffer length {length}"
+            );
+            assert_eq!(
+                serialize_version(value, version, &mut buf[..length]),
+                Err(InvalidEncoding)
+            );
+            if version == T::MAX_VERSION {
+                assert_eq!(serialize(value, &mut buf[..length]), Err(InvalidEncoding));
+            }
+        }
+
+        assert_eq!(value.write_version(version, &mut buf[..size]), Ok(size));
+        assert_eq!(&buf[..size], expected);
+        assert_eq!(
+            serialize_version(value, version, &mut buf).unwrap(),
+            expected
+        );
+        assert_eq!(buf[size], 0xa5);
+        if version == T::MAX_VERSION {
+            assert_eq!(serialize(value, &mut buf).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn primitive_and_option_writers_reject_short_buffers() {
+    assert_buffer_bounds(&true);
+    assert_buffer_bounds(&false);
+    assert_buffer_bounds(&42u8);
+    assert_buffer_bounds(&42u16);
+    assert_buffer_bounds(&42u32);
+    assert_buffer_bounds(&42u64);
+    assert_buffer_bounds(&42u128);
+    assert_buffer_bounds(&42usize);
+    assert_buffer_bounds(&-42i8);
+    assert_buffer_bounds(&-42i16);
+    assert_buffer_bounds(&-42i32);
+    assert_buffer_bounds(&-42i64);
+    assert_buffer_bounds(&-42i128);
+    assert_buffer_bounds(&-42isize);
+    assert_buffer_bounds(&1.25f32);
+    assert_buffer_bounds(&1.25f64);
+    assert_buffer_bounds(&'a');
+    assert_buffer_bounds(&uuid::Uuid::from_bytes([42; 16]));
+    assert_buffer_bounds(&NonZeroU8::new(42).unwrap());
+    assert_buffer_bounds(&NonZeroU64::new(42).unwrap());
+    assert_buffer_bounds(&NonZeroI64::new(-42).unwrap());
+    assert_buffer_bounds(&Some(true));
+    assert_buffer_bounds(&Some(false));
+    assert_buffer_bounds(&None::<bool>);
+    assert_buffer_bounds(&Some(42u32));
+    assert_buffer_bounds(&None::<u32>);
+    assert_buffer_bounds(&Some(NonZeroU8::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroU8>);
+    assert_buffer_bounds(&Some(NonZeroU16::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroU16>);
+    assert_buffer_bounds(&Some(NonZeroU32::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroU32>);
+    assert_buffer_bounds(&Some(NonZeroU64::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroU64>);
+    assert_buffer_bounds(&Some(NonZeroU128::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroU128>);
+    assert_buffer_bounds(&Some(NonZeroUsize::new(42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroUsize>);
+    assert_buffer_bounds(&Some(NonZeroI64::new(-42).unwrap()));
+    assert_buffer_bounds(&None::<NonZeroI64>);
+    assert_buffer_bounds(&Some(Some(42u32)));
+    assert_buffer_bounds(&Some(()));
+    assert_buffer_bounds(&());
+}
+
+#[test]
+fn collection_and_socket_writers_reject_short_buffers() {
+    assert_buffer_bounds(&String::new());
+    assert_buffer_bounds(&"hello".to_string());
+    assert_buffer_bounds(&vec![1u8, 2, 3]);
+    assert_buffer_bounds(&vec![1u16, 2, 3]);
+    assert_buffer_bounds(&vec![1u32, 2, 3]);
+    assert_buffer_bounds(&vec![1u64, 2, 3]);
+    assert_buffer_bounds(&vec![1u128, 2, 3]);
+    assert_buffer_bounds(&vec![-1i8, 2, 3]);
+    assert_buffer_bounds(&vec![-1i16, 2, 3]);
+    assert_buffer_bounds(&vec![-1i32, 2, 3]);
+    assert_buffer_bounds(&vec![-1i64, 2, 3]);
+    assert_buffer_bounds(&vec![-1i128, 2, 3]);
+    assert_buffer_bounds(&vec![(); 3]);
+    assert_buffer_bounds(&Vec::<u32>::new());
+    assert_buffer_bounds(&Vec::<bool>::new());
+    assert_buffer_bounds(&vec![true, false]);
+    assert_buffer_bounds(&vec!["hello".to_string(), "world".to_string()]);
+    assert_buffer_bounds(&[1u32, 2]);
+    assert_buffer_bounds(&[0u32; 0]);
+    assert_buffer_bounds(&(1u8, 2u32, "hello".to_string()));
+    assert_buffer_bounds(&HashMap::from([(1u8, 2u64), (3, 4)]));
+    assert_buffer_bounds(&HashMap::<u8, u64>::new());
+    assert_buffer_bounds(&BTreeMap::from([(1u8, 2u64), (3, 4)]));
+    assert_buffer_bounds(&BTreeMap::<u8, u64>::new());
+    assert_buffer_bounds(&HashSet::from([1u16, 2]));
+    assert_buffer_bounds(&HashSet::<u16>::new());
+    assert_buffer_bounds(&"127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap());
+    assert_buffer_bounds(&std::net::SocketAddr::V6(std::net::SocketAddrV6::new(
+        std::net::Ipv6Addr::LOCALHOST,
+        1234,
+        5678,
+        9012,
+    )));
+}
+
+#[test]
+fn derived_writers_check_buffer_space_for_each_version() {
+    #[derive(Vercode)]
+    struct Versioned {
+        value: u8,
+        #[version(1)]
+        extra: String,
+    }
+
+    #[derive(Vercode)]
+    enum VersionedEvent {
+        Tuple(u8, #[version(1)] String),
+    }
+
+    assert_buffer_bounds(&Named { value: 42u32 });
+    assert_buffer_bounds(&Tuple(42u32));
+    assert_buffer_bounds(&Event::<u32>::Unit);
+    assert_buffer_bounds(&Event::Tuple(42u32));
+    assert_buffer_bounds(&Event::Named { value: 42u32 });
+    assert_buffer_bounds(&Transparent(42u32));
+    assert_buffer_bounds(&Some(Transparent(42u32)));
+    assert_buffer_bounds(&Named {
+        value: vec![Tuple(42u32), Tuple(43)],
+    });
+    assert_buffer_bounds(&Versioned {
+        value: 42,
+        extra: "hello".to_string(),
+    });
+    assert_buffer_bounds(&VersionedEvent::Tuple(42, "hello".to_string()));
+
+    let mut buf = [0xa5; 4];
+    assert_eq!(
+        Named {
+            value: ReportedSize(1)
+        }
+        .write_version(0, &mut buf),
+        Err(InvalidEncoding)
+    );
+    assert_eq!(
+        Tuple(ReportedSize(1)).write_version(0, &mut buf),
+        Err(InvalidEncoding)
+    );
+    assert_eq!(
+        Event::Tuple(ReportedSize(1)).write_version(0, &mut buf),
+        Err(InvalidEncoding)
+    );
+    assert_eq!(
+        Event::Named {
+            value: ReportedSize(1)
+        }
+        .write_version(0, &mut buf),
+        Err(InvalidEncoding)
+    );
+    assert_eq!(buf, [0xa5; 4]);
 }
